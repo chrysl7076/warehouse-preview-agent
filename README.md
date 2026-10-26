@@ -4,6 +4,8 @@
 
 Concept prototype built for a hiring assignment. All site data is fictional ("Demo DC-01, Bhiwandi"). Not an official product of any company.
 
+https://github.com/user-attachments/assets/8669480c-0c58-4040-b2b3-88689fdfae09
+
 ![3D preview with two plans and routes](docs/screenshots/preview.png)
 
 ## The problem
