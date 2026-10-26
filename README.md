@@ -6,6 +6,10 @@ Concept prototype built for a hiring assignment. All site data is fictional ("De
 
 https://github.com/user-attachments/assets/8669480c-0c58-4040-b2b3-88689fdfae09
 
+## Project management case study
+
+How this project was planned, scoped, risk-managed and quality-tested: **[Read the case study](CASE_STUDY.md)**
+
 ![3D preview with two plans and routes](docs/screenshots/preview.png)
 
 ## The problem
