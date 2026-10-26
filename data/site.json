@@ -1,0 +1,344 @@
+{
+  "site": {
+    "id": "DC-01",
+    "name": "Demo DC-01, Bhiwandi",
+    "note": "Fictional sample site for a concept prototype. Not real company data.",
+    "area_m2": 16000
+  },
+  "geometry_m": {
+    "width": 160,
+    "depth": 100,
+    "aisle": 3.4,
+    "rackDepth": 1.1,
+    "slotLength": 1.35,
+    "levelHeight": 1.7,
+    "palletHeight": 1.3,
+    "crossAisleZ": 32,
+    "chilledCorridorX": 52,
+    "chilledEntryZ": 2,
+    "dockZ": 50
+  },
+  "assumptions": {
+    "forkliftSpeed_mps": 2,
+    "handlingPerPallet_s": 75,
+    "liftPerLevel_s": 8,
+    "maxPalletHeight_m": 1.6
+  },
+  "zones": [
+    {
+      "id": "A",
+      "name": "Ambient",
+      "short": "Ambient general goods",
+      "temp": {
+        "min": 15,
+        "max": 30
+      },
+      "levels": 4,
+      "bounds": {
+        "x0": -78,
+        "x1": 20,
+        "z0": -48,
+        "z1": 30
+      },
+      "maxKgByLevel": [
+        1000,
+        1000,
+        800,
+        800
+      ],
+      "occupancy": 0.74,
+      "docks": [
+        "D1",
+        "D2",
+        "D3",
+        "D4",
+        "D5",
+        "D6",
+        "D7"
+      ],
+      "accepts": "General non-hazardous goods (FMCG, apparel, auto parts, retail).",
+      "features": [
+        "Sprinklered (ESFR)",
+        "Reach-truck aisles 3.4 m"
+      ]
+    },
+    {
+      "id": "C",
+      "name": "Chilled",
+      "short": "Chilled 2–8 °C",
+      "temp": {
+        "min": 2,
+        "max": 8
+      },
+      "levels": 4,
+      "bounds": {
+        "x0": 24,
+        "x1": 78,
+        "z0": -48,
+        "z1": -2
+      },
+      "maxKgByLevel": [
+        800,
+        800,
+        800,
+        800
+      ],
+      "occupancy": 0.62,
+      "docks": [
+        "D8",
+        "D9",
+        "D10"
+      ],
+      "accepts": "Pharma (GDP), vaccines, fresh food, dairy. Not frozen goods.",
+      "features": [
+        "Temperature-mapped chamber",
+        "24/7 temperature logging",
+        "Reefer docks D8–D10"
+      ]
+    },
+    {
+      "id": "H",
+      "name": "Dangerous goods",
+      "short": "DG store (classes 3, 8, 9)",
+      "temp": {
+        "min": 15,
+        "max": 30
+      },
+      "levels": 3,
+      "bounds": {
+        "x0": 24,
+        "x1": 50,
+        "z0": 6,
+        "z1": 30
+      },
+      "maxKgByLevel": [
+        800,
+        800,
+        800
+      ],
+      "occupancy": 0.58,
+      "docks": [
+        "D11"
+      ],
+      "hazmatClasses": [
+        "3",
+        "8",
+        "9"
+      ],
+      "accepts": "DG class 3 (flammable liquids), class 8 (corrosives), class 9 (misc., incl. lithium batteries).",
+      "features": [
+        "Spill containment",
+        "Fire-rated walls",
+        "Locked access"
+      ]
+    },
+    {
+      "id": "S",
+      "name": "Secure cage",
+      "short": "High-value secure cage",
+      "temp": {
+        "min": 15,
+        "max": 30
+      },
+      "levels": 3,
+      "bounds": {
+        "x0": 54,
+        "x1": 78,
+        "z0": 6,
+        "z1": 30
+      },
+      "maxKgByLevel": [
+        600,
+        600,
+        600
+      ],
+      "occupancy": 0.45,
+      "docks": [
+        "D12"
+      ],
+      "accepts": "High-value goods: electronics, phones, luxury, pharma APIs (ambient).",
+      "features": [
+        "Mesh cage",
+        "CCTV",
+        "Access control with audit log"
+      ]
+    }
+  ],
+  "docks": [
+    {
+      "id": "D1",
+      "x": -66,
+      "z": 50,
+      "zone": "A",
+      "type": "Dock leveller"
+    },
+    {
+      "id": "D2",
+      "x": -54,
+      "z": 50,
+      "zone": "A",
+      "type": "Dock leveller"
+    },
+    {
+      "id": "D3",
+      "x": -42,
+      "z": 50,
+      "zone": "A",
+      "type": "Dock leveller"
+    },
+    {
+      "id": "D4",
+      "x": -30,
+      "z": 50,
+      "zone": "A",
+      "type": "Dock leveller"
+    },
+    {
+      "id": "D5",
+      "x": -18,
+      "z": 50,
+      "zone": "A",
+      "type": "Dock leveller"
+    },
+    {
+      "id": "D6",
+      "x": -6,
+      "z": 50,
+      "zone": "A",
+      "type": "Dock leveller"
+    },
+    {
+      "id": "D7",
+      "x": 6,
+      "z": 50,
+      "zone": "A",
+      "type": "Dock leveller"
+    },
+    {
+      "id": "D8",
+      "x": 18,
+      "z": 50,
+      "zone": "C",
+      "type": "Reefer dock, sealed shelter"
+    },
+    {
+      "id": "D9",
+      "x": 30,
+      "z": 50,
+      "zone": "C",
+      "type": "Reefer dock, sealed shelter"
+    },
+    {
+      "id": "D10",
+      "x": 42,
+      "z": 50,
+      "zone": "C",
+      "type": "Reefer dock, sealed shelter"
+    },
+    {
+      "id": "D11",
+      "x": 54,
+      "z": 50,
+      "zone": "H",
+      "type": "Dock leveller"
+    },
+    {
+      "id": "D12",
+      "x": 66,
+      "z": 50,
+      "zone": "S",
+      "type": "Dock leveller"
+    }
+  ],
+  "not_offered": {
+    "frozen": "This site has no frozen (−18 °C) storage.",
+    "hazmatClasses": "DG classes 1, 2, 4, 5, 6 and 7 are not licensed at this site.",
+    "chilledHazmat": "There is no temperature-controlled DG store at this site."
+  },
+  "csv_columns": [
+    "location_id",
+    "zone",
+    "row",
+    "bay",
+    "level",
+    "x_m",
+    "z_m",
+    "aisle_x_m",
+    "max_kg",
+    "status",
+    "note"
+  ],
+  "summary": {
+    "site": "Demo DC-01, Bhiwandi",
+    "note": "Fictional sample site for a concept prototype. Not real company data.",
+    "building_m": "160 × 100",
+    "area_m2": 16000,
+    "pallet_positions": 10144,
+    "free_now": 3159,
+    "docks": 12,
+    "max_pallet_height_m": 1.6,
+    "zones": [
+      {
+        "zone": "A",
+        "name": "Ambient",
+        "temperature": "15–30 °C",
+        "total_positions": 7168,
+        "occupied": 5204,
+        "blocked": 34,
+        "reserved_in_this_session": 0,
+        "free_now": 1930,
+        "utilisation_pct": 73,
+        "rack_levels": 4,
+        "max_kg_per_pallet": 1000,
+        "docks": "D1, D2, D3, D4, D5, D6, D7"
+      },
+      {
+        "zone": "C",
+        "name": "Chilled",
+        "temperature": "2–8 °C",
+        "total_positions": 2304,
+        "occupied": 1502,
+        "blocked": 9,
+        "reserved_in_this_session": 0,
+        "free_now": 793,
+        "utilisation_pct": 66,
+        "rack_levels": 4,
+        "max_kg_per_pallet": 800,
+        "docks": "D8, D9, D10"
+      },
+      {
+        "zone": "H",
+        "name": "Dangerous goods",
+        "temperature": "15–30 °C",
+        "total_positions": 384,
+        "occupied": 134,
+        "blocked": 0,
+        "reserved_in_this_session": 0,
+        "free_now": 250,
+        "utilisation_pct": 35,
+        "rack_levels": 3,
+        "max_kg_per_pallet": 800,
+        "docks": "D11"
+      },
+      {
+        "zone": "S",
+        "name": "Secure cage",
+        "temperature": "15–30 °C",
+        "total_positions": 288,
+        "occupied": 99,
+        "blocked": 3,
+        "reserved_in_this_session": 0,
+        "free_now": 186,
+        "utilisation_pct": 35,
+        "rack_levels": 3,
+        "max_kg_per_pallet": 600,
+        "docks": "D12"
+      }
+    ],
+    "not_offered": [
+      "This site has no frozen (−18 °C) storage.",
+      "DG classes 1, 2, 4, 5, 6 and 7 are not licensed at this site.",
+      "There is no temperature-controlled DG store at this site."
+    ]
+  }
+}

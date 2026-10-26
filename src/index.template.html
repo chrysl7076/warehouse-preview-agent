@@ -1,0 +1,120 @@
+<title>Warehouse Preview Agent</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="Concept prototype: an AI agent that plans where a client's goods would go in a 3D warehouse, using sample data.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@400;600&display=swap">
+<style>
+/*STYLES*/
+</style>
+
+<div class="app">
+  <header class="top">
+    <div class="brand">
+      <svg class="mark" viewBox="0 0 26 26" aria-hidden="true"><rect x="1" y="1" width="24" height="24" rx="4" fill="var(--safety)"/><path d="M6 19V11l7-4 7 4v8" fill="none" stroke="var(--safety-ink)" stroke-width="2" stroke-linejoin="round"/><path d="M9.5 19v-5h7v5" fill="none" stroke="var(--safety-ink)" stroke-width="2"/></svg>
+      <h1>Warehouse Preview Agent</h1>
+      <span class="site-chip">Demo DC-01 · sample data</span>
+    </div>
+    <nav class="tabs" role="tablist" aria-label="Views">
+      <button role="tab" id="tab-preview" aria-selected="true" aria-controls="view-preview">Preview</button>
+      <button role="tab" id="tab-tests" aria-selected="false" aria-controls="view-tests">Test bench</button>
+      <button role="tab" id="tab-about" aria-selected="false" aria-controls="view-about">How it works</button>
+    </nav>
+    <div class="brain" id="brain"><span class="dot" id="brain-dot"></span><span id="brain-label">Connecting…</span></div>
+  </header>
+
+  <main class="view" id="view-preview" role="tabpanel" aria-labelledby="tab-preview">
+    <section class="stage" id="stage" aria-label="3D warehouse">
+      <div class="loading" id="loading">Building the warehouse…</div>
+      <div class="overlay legend" aria-label="Legend">
+        <div class="row"><span class="sw" style="background:var(--pallet)"></span>Occupied pallet</div>
+        <div class="row"><span class="sw" style="background:transparent"></span>Empty shelf = free space</div>
+        <div class="row"><span class="sw" style="background:var(--critical)"></span>Blocked (repair)</div>
+        <div class="row"><span class="sw" style="background:var(--plan-1)"></span>Your plan (P1, P2…)</div>
+        <div class="row"><span class="sw" style="background:var(--rack-beam)"></span>Rack beams · <span class="sw" style="background:var(--rack-upright)"></span>frames</div>
+      </div>
+      <div class="hint" id="hint">Drag to rotate · scroll to zoom · click a pallet</div>
+      <div class="overlay toolbar" role="group" aria-label="Experience">
+        <button type="button" id="btn-walk" aria-pressed="false"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8.5" cy="2.6" r="1.6" fill="currentColor"/><path d="M7.5 5.2l-2 3.2 2 1-1 5M8.6 5.2l1.4 3.8 2 .6M7.7 9.6l2.2 1.6.6 3.6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Walk inside</span></button>
+        <button type="button" id="btn-tour" aria-pressed="false"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5v11l9-5.5z" fill="currentColor"/></svg><span>Site tour</span></button>
+        <button type="button" id="btn-sound" aria-pressed="false"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 6h3l4-3v10l-4-3H2z" fill="currentColor"/><path id="snd-wave" d="M11 5.5a3.5 3.5 0 010 5M12.8 3.8a6 6 0 010 8.4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg><span>Sound off</span></button>
+      </div>
+      <div class="where" id="where" hidden></div>
+      <div class="crosshair" aria-hidden="true"></div>
+      <div class="pad" id="pad" aria-label="Walk controls" hidden>
+        <button type="button" data-pad="tl" aria-label="Turn left">⟲</button>
+        <button type="button" data-pad="f" aria-label="Walk forward">▲</button>
+        <button type="button" data-pad="tr" aria-label="Turn right">⟳</button>
+        <button type="button" data-pad="l" aria-label="Step left">◀</button>
+        <button type="button" data-pad="b" aria-label="Walk back">▼</button>
+        <button type="button" data-pad="r" aria-label="Step right">▶</button>
+      </div>
+      <div class="caption" id="caption" hidden role="status" aria-live="polite">
+        <div class="cap-title" id="cap-title"></div>
+        <div class="cap-text" id="cap-text"></div>
+        <div class="cap-foot"><span class="cap-steps" id="cap-steps"></span><button type="button" class="cap-skip" id="cap-skip">Skip</button></div>
+      </div>
+      <div class="overlay cams" role="group" aria-label="Camera">
+        <button data-cam="overview">Overview</button>
+        <button data-cam="docks">Docks</button>
+        <button data-cam="A">A Ambient</button>
+        <button data-cam="C">C Chilled</button>
+        <button data-cam="H">H DG</button>
+        <button data-cam="S">S Secure</button>
+      </div>
+      <div class="slot-card" id="slot-card" hidden></div>
+    </section>
+
+    <aside class="panel" aria-label="Agent">
+      <div class="capacity" id="capacity"><h2>Free space now</h2></div>
+      <div class="chat" id="chat" aria-live="polite">
+        <div class="welcome" id="welcome">
+          <p><strong>Tell me what you want to store.</strong> I'll check the site rules, reserve the best free positions, show them in 3D and draw the forklift route from the dock.</p>
+          <p class="note">Every number I give comes from the site data. This is a fictional sample site.</p>
+        </div>
+      </div>
+      <div class="composer">
+        <div class="chips" id="chips"></div>
+        <form class="inputrow" id="form">
+          <label for="input" class="sr" hidden>Message</label>
+          <textarea id="input" rows="1" placeholder="e.g. 400 pallets of vaccines at 2–8 °C"></textarea>
+          <button class="btn primary" id="send" type="submit">Send</button>
+          <button class="btn" id="stop" type="button" hidden>Stop</button>
+        </form>
+        <div class="meta">
+          <span>Model: <span class="seg" role="group" aria-label="Model speed"><button type="button" id="tier-quick" aria-pressed="true">Fast</button><button type="button" id="tier-default" aria-pressed="false">Thorough</button></span></span>
+          <button type="button" class="linkbtn" id="reset">Reset plans</button>
+        </div>
+      </div>
+    </aside>
+  </main>
+
+  <main class="view page" id="view-tests" role="tabpanel" aria-labelledby="tab-tests" hidden>
+    <div class="inner" id="tests-root"></div>
+  </main>
+
+  <main class="view page" id="view-about" role="tabpanel" aria-labelledby="tab-about" hidden>
+    <div class="inner" id="about-root"></div>
+  </main>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script>
+/*CORE*/
+</script>
+<script>
+/*SCENE*/
+</script>
+<script>
+/*IMMERSIVE*/
+</script>
+<script>
+/*AGENT*/
+</script>
+<script>
+/*EVAL*/
+</script>
+<script>
+/*APP*/
+</script>

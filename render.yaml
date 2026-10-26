@@ -1,0 +1,21 @@
+# One-click deploy on Render (free plan): New + > Blueprint > pick this repo.
+# Render asks for GROQ_API_KEY when you create it; the key stays on the server.
+services:
+  - type: web
+    name: warehouse-preview-agent
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: node server.js
+    healthCheckPath: /api/health
+    envVars:
+      - key: PROVIDER
+        value: groq
+      - key: GROQ_API_KEY
+        sync: false
+      - key: HOST
+        value: 0.0.0.0
+      - key: LIMIT_PER_IP
+        value: "40"
+      - key: LIMIT_PER_DAY
+        value: "1500"

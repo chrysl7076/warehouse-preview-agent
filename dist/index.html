@@ -1,0 +1,3096 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}[hidden]{display:none!important}</style>
+</head>
+<body>
+<title>Warehouse Preview Agent</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="Concept prototype: an AI agent that plans where a client's goods would go in a 3D warehouse, using sample data.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: one-screen app. Header strip, then 3D scene (left) + agent panel (right); stacks on phones. */
+:root {
+  --bg: #eef0f2;            /* concrete, slightly cool */
+  --surface: #ffffff;
+  --surface-2: #f5f6f8;
+  --ink: #15191f;
+  --ink-2: #4a5360;
+  --ink-3: #6d7684;
+  --line: #d8dce2;
+  --safety: #e8a800;        /* floor-marking yellow, the one accent */
+  --safety-ink: #1b1600;
+  --safety-soft: #fff4cf;
+  --good: #1f8a4c;
+  --warning: #b86e00;
+  --critical: #c8362d;
+  --zone-A: #8a96a8;
+  --zone-C: #3f8fd6;
+  --zone-H: #d4572a;
+  --zone-S: #7a5bc7;
+  --plan-1: #e0428a;
+  --plan-2: #13a89e;
+  --plan-3: #6aa82a;
+  --plan-4: #2f6fe0;
+  --scene-bg: #dfe3e8;
+  --scene-floor: #c9ced5;
+  --scene-yard: #b8bdc4;
+  --scene-wall: #7d8794;
+  --scene-door: #4c5562;
+  --rack-upright: #2f5b8c;  /* pallet racking: blue frames */
+  --rack-beam: #e06a1f;     /* orange beams */
+  --pallet: #b8a27e;        /* cardboard */
+  --font-display: 'Barlow Condensed', 'Arial Narrow', system-ui, sans-serif;
+  --font-body: 'Barlow', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+  --radius: 6px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #121519; --surface: #1a1e24; --surface-2: #20252c; --ink: #e9ecf0; --ink-2: #b3bbc6; --ink-3: #8d96a3; --line: #2e353f;
+    --safety: #f5b700; --safety-ink: #1b1600; --safety-soft: #3a3010; --good: #3fb871; --warning: #e0a030; --critical: #ef5a50;
+    --zone-A: #8d9aae; --zone-C: #59a6ec; --zone-H: #ec6c3c; --zone-S: #9a7ee0;
+    --plan-1: #f25d9e; --plan-2: #23c4b8; --plan-3: #86c63e; --plan-4: #5b8ff0;
+    --scene-bg: #161a20; --scene-floor: #2a3038; --scene-yard: #20252c; --scene-wall: #5d6775; --scene-door: #3a424e;
+    --rack-upright: #3d72ad; --rack-beam: #e67a30; --pallet: #8c7b5f;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #121519; --surface: #1a1e24; --surface-2: #20252c; --ink: #e9ecf0; --ink-2: #b3bbc6; --ink-3: #8d96a3; --line: #2e353f;
+  --safety: #f5b700; --safety-ink: #1b1600; --safety-soft: #3a3010; --good: #3fb871; --warning: #e0a030; --critical: #ef5a50;
+  --zone-A: #8d9aae; --zone-C: #59a6ec; --zone-H: #ec6c3c; --zone-S: #9a7ee0;
+  --plan-1: #f25d9e; --plan-2: #23c4b8; --plan-3: #86c63e; --plan-4: #5b8ff0;
+  --scene-bg: #161a20; --scene-floor: #2a3038; --scene-yard: #20252c; --scene-wall: #5d6775; --scene-door: #3a424e;
+  --rack-upright: #3d72ad; --rack-beam: #e67a30; --pallet: #8c7b5f;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body { background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 15px; line-height: 1.45; }
+button, input, select, textarea { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--safety); outline-offset: 2px; }
+code, .mono { font-family: var(--font-mono); font-size: 0.86em; }
+
+.app { height: 100%; display: flex; flex-direction: column; }
+
+/* Header */
+.top {
+  display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  padding-block: 10px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  background: var(--surface); border-bottom: 1px solid var(--line);
+}
+.brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.mark { width: 26px; height: 26px; flex: none; }
+.brand h1 { font-family: var(--font-display); font-weight: 600; font-size: 21px; letter-spacing: 0.01em; margin: 0; line-height: 1; white-space: nowrap; }
+.site-chip { font-size: 12.5px; color: var(--ink-2); border: 1px dashed var(--line); border-radius: 999px; padding: 2px 10px; white-space: nowrap; }
+.tabs { display: flex; gap: 2px; margin-left: auto; background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; padding: 2px; }
+.tabs button { border: 0; background: none; padding: 5px 12px; border-radius: 6px; cursor: pointer; font-weight: 500; color: var(--ink-2); }
+.tabs button[aria-selected="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px rgb(0 0 0 / 0.08); }
+.brain { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ink-2); white-space: nowrap; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ink-3); }
+.dot.live { background: var(--good); box-shadow: 0 0 0 3px color-mix(in srgb, var(--good) 25%, transparent); }
+.dot.demo { background: var(--warning); }
+
+/* Views */
+.view { flex: 1; min-height: 0; }
+.view[hidden] { display: none !important; }
+#view-preview { display: grid; grid-template-columns: minmax(0, 1fr) 410px; }
+
+/* Scene */
+.stage { position: relative; min-width: 0; min-height: 0; overflow: hidden; background: var(--scene-bg); }
+.stage canvas { display: block; touch-action: none; }
+.scene-labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.scene-label { position: absolute; left: 0; top: 0; white-space: nowrap; font-size: 12px; will-change: transform; }
+.scene-label.zone { font-family: var(--font-display); font-size: 15px; font-weight: 600; background: color-mix(in srgb, var(--surface) 88%, transparent); border-left: 3px solid var(--ink-3); padding: 2px 8px; border-radius: 3px; }
+.scene-label.zone span { font-family: var(--font-body); font-weight: 500; font-size: 11.5px; color: var(--ink-2); margin-left: 6px; }
+.scene-label.zone-A { border-color: var(--zone-A); } .scene-label.zone-C { border-color: var(--zone-C); }
+.scene-label.zone-H { border-color: var(--zone-H); } .scene-label.zone-S { border-color: var(--zone-S); }
+.scene-label.dock { font-family: var(--font-mono); font-size: 10.5px; font-weight: 600; background: var(--safety); color: var(--safety-ink); padding: 0 4px; border-radius: 2px; }
+.scene-label.dock.reefer { background: var(--zone-C); color: #fff; }
+
+.overlay { position: absolute; display: flex; gap: 6px; flex-wrap: wrap; }
+.legend { top: 12px; left: 12px; background: color-mix(in srgb, var(--surface) 92%, transparent); border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 10px; font-size: 12px; flex-direction: column; gap: 4px; max-width: 220px; }
+.legend .row { display: flex; align-items: center; gap: 7px; }
+.sw { width: 11px; height: 11px; border-radius: 2px; flex: none; border: 1px solid color-mix(in srgb, var(--ink) 20%, transparent); }
+.cams { left: 12px; bottom: 12px; right: 12px; }
+.cams button { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 4px 10px; font-size: 13px; cursor: pointer; }
+.cams button:hover { border-color: var(--ink-3); }
+.hint { position: absolute; right: 12px; top: 12px; font-size: 12px; color: var(--ink-2); background: color-mix(in srgb, var(--surface) 85%, transparent); padding: 3px 8px; border-radius: var(--radius); }
+.slot-card { position: absolute; z-index: 3; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 12px; font-size: 13px; box-shadow: 0 6px 20px rgb(0 0 0 / 0.15); min-width: 200px; max-width: 260px; }
+.slot-card h4 { margin: 0 0 4px; font-family: var(--font-mono); font-size: 14px; }
+.slot-card dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; margin: 0; }
+.slot-card dt { color: var(--ink-3); } .slot-card dd { margin: 0; }
+.loading { position: absolute; inset: 0; display: grid; place-items: center; color: var(--ink-2); font-size: 14px; }
+
+/* Panel */
+.panel { display: flex; flex-direction: column; min-height: 0; background: var(--surface); border-left: 1px solid var(--line); }
+.capacity { padding: 12px 16px 10px; border-bottom: 1px solid var(--line); display: grid; gap: 6px; }
+.capacity h2, .section-title { font-family: var(--font-display); font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); margin: 0; font-weight: 600; }
+.cap-row { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: center; gap: 8px; font-size: 13px; }
+.cap-row b { font-family: var(--font-display); font-size: 15px; text-align: center; border-radius: 3px; color: #fff; line-height: 20px; }
+.bar { height: 8px; border-radius: 4px; background: var(--surface-2); overflow: hidden; display: flex; border: 1px solid var(--line); }
+.bar i { display: block; height: 100%; }
+.bar .used { background: color-mix(in srgb, var(--ink-3) 55%, transparent); }
+.bar .res { background: var(--plan-1); }
+.cap-row .num { font-variant-numeric: tabular-nums; color: var(--ink-2); min-width: 92px; text-align: right; }
+
+.chat { flex: 1; min-height: 0; overflow-y: auto; padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; scroll-behavior: smooth; }
+.msg { max-width: 100%; }
+.msg.user { align-self: flex-end; background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px 10px 2px 10px; padding: 8px 12px; max-width: 88%; }
+.msg.agent .who { font-family: var(--font-display); font-size: 13px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 4px; display: flex; gap: 8px; align-items: center; }
+.msg.agent .text { white-space: pre-wrap; }
+.msg.agent .text.thinking { color: var(--ink-3); }
+.steps { list-style: none; margin: 0 0 8px; padding: 0; display: grid; gap: 4px; border-left: 2px solid var(--line); }
+.step { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 6px; padding: 3px 0 3px 8px; font-size: 13px; color: var(--ink-2); }
+.step .ic { width: 14px; height: 14px; margin-top: 3px; }
+.step .name { font-weight: 600; color: var(--ink); }
+.step .res { display: block; color: var(--ink-2); overflow-wrap: anywhere; }
+.step.fail .res { color: var(--critical); }
+.step.run .ic { animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.badge { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--ink-2); margin-top: 6px; }
+.badge.ok { border-color: color-mix(in srgb, var(--good) 45%, transparent); color: var(--good); }
+.badge.warn { border-color: color-mix(in srgb, var(--warning) 50%, transparent); color: var(--warning); }
+.welcome { color: var(--ink-2); font-size: 14px; }
+.welcome p { margin: 0 0 8px; }
+
+.composer { border-top: 1px solid var(--line); padding: 10px 16px 12px; display: grid; gap: 8px; }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.chip { border: 1px solid var(--line); background: var(--surface-2); border-radius: 999px; padding: 3px 10px; font-size: 12.5px; cursor: pointer; }
+.chip:hover { border-color: var(--safety); }
+.inputrow { display: flex; gap: 8px; align-items: flex-end; }
+.inputrow textarea { flex: 1; min-width: 0; resize: none; border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 10px; background: var(--surface); min-height: 40px; max-height: 120px; }
+.btn { border: 1px solid var(--line); background: var(--surface); border-radius: var(--radius); padding: 8px 14px; cursor: pointer; font-weight: 600; }
+.btn.primary { background: var(--safety); color: var(--safety-ink); border-color: var(--safety); }
+.btn:disabled { opacity: 0.5; cursor: default; }
+.composer .meta { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 12px; color: var(--ink-3); flex-wrap: wrap; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.seg button { border: 0; background: none; padding: 2px 9px; cursor: pointer; font-size: 12px; color: var(--ink-2); }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--surface); }
+.linkbtn { border: 0; background: none; color: var(--ink-2); text-decoration: underline; cursor: pointer; padding: 0; font-size: 12px; }
+
+/* Report */
+.report { border: 1px solid var(--line); border-top: 4px solid var(--safety); border-radius: var(--radius); padding: 12px 14px; background: var(--surface); font-size: 13px; }
+.report h3 { font-family: var(--font-display); font-size: 19px; margin: 0; }
+.report .sub { color: var(--ink-3); font-size: 12px; margin-bottom: 8px; }
+.report table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.report th, .report td { text-align: left; padding: 4px 6px 4px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+.report th { font-weight: 600; color: var(--ink-3); font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.04em; }
+.report .tw { overflow-x: auto; }
+.report ul { margin: 6px 0 0; padding-left: 18px; }
+.report .actions { display: flex; gap: 8px; margin-top: 10px; }
+
+/* Secondary views */
+.page { overflow-y: auto; padding-block: 24px 48px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.page .inner { max-width: 980px; margin: 0 auto; display: grid; gap: 20px; }
+.page h2 { font-family: var(--font-display); font-size: 30px; line-height: 1.1; margin: 0; text-wrap: balance; }
+.page h3 { font-family: var(--font-display); font-size: 20px; margin: 0 0 6px; }
+.page p { margin: 0; max-width: 68ch; color: var(--ink-2); }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px 18px; min-width: 0; }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+.tablewrap { overflow-x: auto; }
+table.data { width: 100%; border-collapse: collapse; font-size: 13.5px; font-variant-numeric: tabular-nums; }
+table.data th, table.data td { text-align: left; padding: 7px 10px 7px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+table.data th { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-3); font-weight: 600; }
+.pill { display: inline-block; font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 999px; }
+.pill.pass { background: color-mix(in srgb, var(--good) 16%, transparent); color: var(--good); }
+.pill.fail { background: color-mix(in srgb, var(--critical) 14%, transparent); color: var(--critical); }
+.pill.wait { background: var(--surface-2); color: var(--ink-3); }
+.score { display: flex; gap: 24px; flex-wrap: wrap; align-items: baseline; }
+.score .big { font-family: var(--font-display); font-size: 44px; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; }
+.score .lbl { font-size: 12px; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.06em; }
+.diagram { overflow-x: auto; }
+.diagram svg { display: block; min-width: 640px; width: 100%; height: auto; }
+.note { font-size: 13px; color: var(--ink-3); }
+
+/* Immersive controls */
+.toolbar { top: 12px; right: 12px; justify-content: flex-end; max-width: 70%; }
+.toolbar button { display: inline-flex; align-items: center; gap: 6px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 5px 10px; font-size: 13px; font-weight: 600; cursor: pointer; }
+.toolbar button svg { width: 15px; height: 15px; }
+.toolbar button:hover { border-color: var(--ink-3); }
+.toolbar button[aria-pressed="true"] { background: var(--ink); color: var(--surface); border-color: var(--ink); }
+#btn-sound[aria-pressed="false"] #snd-wave { opacity: 0.25; }
+.hint { top: 52px; }
+.where { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); background: color-mix(in srgb, #0f1216 80%, transparent); color: #f3f4f1; padding: 6px 14px; border-radius: 999px; font-size: 13.5px; font-weight: 500; white-space: nowrap; max-width: calc(100% - 24px); overflow: hidden; text-overflow: ellipsis; }
+.crosshair { display: none; position: absolute; left: 50%; top: 50%; width: 6px; height: 6px; margin: -3px 0 0 -3px; border-radius: 50%; background: rgb(255 255 255 / 0.85); box-shadow: 0 0 0 1px rgb(0 0 0 / 0.4); pointer-events: none; }
+.stage.mode-walk .crosshair { display: block; }
+.stage.mode-walk .legend, .stage.mode-journey .legend, .stage.mode-tour .legend { display: none; }
+.stage.mode-walk canvas { cursor: grab; }
+.stage.mode-journey .cams, .stage.mode-journey .scene-labels { display: none; }
+.pad { position: absolute; right: 12px; bottom: 56px; display: grid; grid-template-columns: repeat(3, 48px); gap: 6px; touch-action: none; }
+.pad button { width: 48px; height: 48px; border-radius: 10px; border: 1px solid var(--line); background: color-mix(in srgb, var(--surface) 88%, transparent); font-size: 18px; cursor: pointer; user-select: none; -webkit-user-select: none; touch-action: none; }
+.pad button:active { background: var(--safety); color: var(--safety-ink); }
+.caption { position: absolute; left: 50%; bottom: 60px; transform: translateX(-50%); width: min(680px, calc(100% - 24px)); background: color-mix(in srgb, #0f1216 84%, transparent); color: #f3f4f1; border-radius: 10px; padding: 14px 18px 12px; display: grid; gap: 6px; box-shadow: 0 10px 30px rgb(0 0 0 / 0.25); }
+.cap-title { font-family: var(--font-display); font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: #f5b700; font-weight: 600; }
+.cap-text { font-size: 17px; line-height: 1.45; }
+.cap-foot { display: flex; justify-content: space-between; align-items: center; gap: 12px; font-size: 12px; color: #b3bbc6; }
+.cap-steps { display: inline-flex; gap: 4px; }
+.cap-steps i { width: 18px; height: 3px; border-radius: 2px; background: rgb(255 255 255 / 0.25); }
+.cap-steps i.on { background: #f5b700; }
+.cap-skip { border: 1px solid rgb(255 255 255 / 0.3); background: transparent; color: #f3f4f1; border-radius: 6px; padding: 2px 10px; cursor: pointer; font-size: 12px; }
+.follow { margin: 4px 0 2px 24px; display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); background: var(--surface-2); border-radius: 999px; padding: 2px 10px 2px 8px; font-size: 12.5px; font-weight: 600; cursor: pointer; }
+.follow:hover { border-color: var(--safety); }
+.follow svg { width: 11px; height: 11px; }
+
+@media (max-width: 860px) {
+  .toolbar { max-width: calc(100% - 24px); }
+  .toolbar button span { display: none; }
+  .caption { bottom: 52px; }
+  .cap-text { font-size: 15px; }
+  html, body { height: auto; }
+  .app { height: auto; min-height: 100%; }
+  #view-preview { grid-template-columns: minmax(0, 1fr); grid-template-rows: 52vh auto; }
+  .chat { min-height: 280px; max-height: 60vh; }
+  .panel { border-left: 0; border-top: 1px solid var(--line); }
+  .tabs { margin-left: 0; order: 3; width: 100%; }
+  .tabs button { flex: 1; }
+  .legend { display: none; }
+  .hint { display: none; }
+  .site-chip { display: none; }
+}
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; scroll-behavior: auto !important; } }
+
+/* Layering inside the 3D stage: labels < controls < captions < slot card */
+.scene-labels { z-index: 1; }
+.overlay, .hint, .where, .pad { z-index: 3; }
+.caption { z-index: 4; }
+.slot-card { z-index: 5; }
+@media (max-width: 860px) {
+  .where { top: 52px; left: 12px; transform: none; font-size: 12.5px; }
+  .stage.mode-walk .cams { display: none; }
+  .pad { bottom: 12px; }
+}
+
+</style>
+
+<div class="app">
+  <header class="top">
+    <div class="brand">
+      <svg class="mark" viewBox="0 0 26 26" aria-hidden="true"><rect x="1" y="1" width="24" height="24" rx="4" fill="var(--safety)"/><path d="M6 19V11l7-4 7 4v8" fill="none" stroke="var(--safety-ink)" stroke-width="2" stroke-linejoin="round"/><path d="M9.5 19v-5h7v5" fill="none" stroke="var(--safety-ink)" stroke-width="2"/></svg>
+      <h1>Warehouse Preview Agent</h1>
+      <span class="site-chip">Demo DC-01 · sample data</span>
+    </div>
+    <nav class="tabs" role="tablist" aria-label="Views">
+      <button role="tab" id="tab-preview" aria-selected="true" aria-controls="view-preview">Preview</button>
+      <button role="tab" id="tab-tests" aria-selected="false" aria-controls="view-tests">Test bench</button>
+      <button role="tab" id="tab-about" aria-selected="false" aria-controls="view-about">How it works</button>
+    </nav>
+    <div class="brain" id="brain"><span class="dot" id="brain-dot"></span><span id="brain-label">Connecting…</span></div>
+  </header>
+
+  <main class="view" id="view-preview" role="tabpanel" aria-labelledby="tab-preview">
+    <section class="stage" id="stage" aria-label="3D warehouse">
+      <div class="loading" id="loading">Building the warehouse…</div>
+      <div class="overlay legend" aria-label="Legend">
+        <div class="row"><span class="sw" style="background:var(--pallet)"></span>Occupied pallet</div>
+        <div class="row"><span class="sw" style="background:transparent"></span>Empty shelf = free space</div>
+        <div class="row"><span class="sw" style="background:var(--critical)"></span>Blocked (repair)</div>
+        <div class="row"><span class="sw" style="background:var(--plan-1)"></span>Your plan (P1, P2…)</div>
+        <div class="row"><span class="sw" style="background:var(--rack-beam)"></span>Rack beams · <span class="sw" style="background:var(--rack-upright)"></span>frames</div>
+      </div>
+      <div class="hint" id="hint">Drag to rotate · scroll to zoom · click a pallet</div>
+      <div class="overlay toolbar" role="group" aria-label="Experience">
+        <button type="button" id="btn-walk" aria-pressed="false"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8.5" cy="2.6" r="1.6" fill="currentColor"/><path d="M7.5 5.2l-2 3.2 2 1-1 5M8.6 5.2l1.4 3.8 2 .6M7.7 9.6l2.2 1.6.6 3.6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Walk inside</span></button>
+        <button type="button" id="btn-tour" aria-pressed="false"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5v11l9-5.5z" fill="currentColor"/></svg><span>Site tour</span></button>
+        <button type="button" id="btn-sound" aria-pressed="false"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 6h3l4-3v10l-4-3H2z" fill="currentColor"/><path id="snd-wave" d="M11 5.5a3.5 3.5 0 010 5M12.8 3.8a6 6 0 010 8.4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg><span>Sound off</span></button>
+      </div>
+      <div class="where" id="where" hidden></div>
+      <div class="crosshair" aria-hidden="true"></div>
+      <div class="pad" id="pad" aria-label="Walk controls" hidden>
+        <button type="button" data-pad="tl" aria-label="Turn left">⟲</button>
+        <button type="button" data-pad="f" aria-label="Walk forward">▲</button>
+        <button type="button" data-pad="tr" aria-label="Turn right">⟳</button>
+        <button type="button" data-pad="l" aria-label="Step left">◀</button>
+        <button type="button" data-pad="b" aria-label="Walk back">▼</button>
+        <button type="button" data-pad="r" aria-label="Step right">▶</button>
+      </div>
+      <div class="caption" id="caption" hidden role="status" aria-live="polite">
+        <div class="cap-title" id="cap-title"></div>
+        <div class="cap-text" id="cap-text"></div>
+        <div class="cap-foot"><span class="cap-steps" id="cap-steps"></span><button type="button" class="cap-skip" id="cap-skip">Skip</button></div>
+      </div>
+      <div class="overlay cams" role="group" aria-label="Camera">
+        <button data-cam="overview">Overview</button>
+        <button data-cam="docks">Docks</button>
+        <button data-cam="A">A Ambient</button>
+        <button data-cam="C">C Chilled</button>
+        <button data-cam="H">H DG</button>
+        <button data-cam="S">S Secure</button>
+      </div>
+      <div class="slot-card" id="slot-card" hidden></div>
+    </section>
+
+    <aside class="panel" aria-label="Agent">
+      <div class="capacity" id="capacity"><h2>Free space now</h2></div>
+      <div class="chat" id="chat" aria-live="polite">
+        <div class="welcome" id="welcome">
+          <p><strong>Tell me what you want to store.</strong> I'll check the site rules, reserve the best free positions, show them in 3D and draw the forklift route from the dock.</p>
+          <p class="note">Every number I give comes from the site data. This is a fictional sample site.</p>
+        </div>
+      </div>
+      <div class="composer">
+        <div class="chips" id="chips"></div>
+        <form class="inputrow" id="form">
+          <label for="input" class="sr" hidden>Message</label>
+          <textarea id="input" rows="1" placeholder="e.g. 400 pallets of vaccines at 2–8 °C"></textarea>
+          <button class="btn primary" id="send" type="submit">Send</button>
+          <button class="btn" id="stop" type="button" hidden>Stop</button>
+        </form>
+        <div class="meta">
+          <span>Model: <span class="seg" role="group" aria-label="Model speed"><button type="button" id="tier-quick" aria-pressed="true">Fast</button><button type="button" id="tier-default" aria-pressed="false">Thorough</button></span></span>
+          <button type="button" class="linkbtn" id="reset">Reset plans</button>
+        </div>
+      </div>
+    </aside>
+  </main>
+
+  <main class="view page" id="view-tests" role="tabpanel" aria-labelledby="tab-tests" hidden>
+    <div class="inner" id="tests-root"></div>
+  </main>
+
+  <main class="view page" id="view-about" role="tabpanel" aria-labelledby="tab-about" hidden>
+    <div class="inner" id="about-root"></div>
+  </main>
+</div>
+
+<script src="vendor/three.min.js"></script>
+<script>window.THREE || document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"><\/script>')</script>
+<script src="vendor/OrbitControls.js"></script>
+<script>(window.THREE && THREE.OrbitControls) || document.write('<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"><\/script>')</script>
+<script>
+/*
+ * Warehouse core — the single source of truth.
+ *
+ * Pure logic, no UI and no AI: the site model, its storage rules, and the
+ * deterministic functions the agent is allowed to call (find space, routes,
+ * zone status, reports). The 3D viewer, the agent and the tests all use this
+ * file, so every number the agent says can be traced back to it.
+ *
+ * Works in the browser (window.WarehouseCore) and in Node (require).
+ * All data is FICTIONAL sample data for a concept prototype.
+ */
+(function (root, factory) {
+  if (typeof module === 'object' && module.exports) module.exports = factory();
+  else root.WarehouseCore = factory();
+})(typeof self !== 'undefined' ? self : this, function () {
+  'use strict';
+
+  // ---------- Physical constants (metres) ----------
+  const GEOM = {
+    width: 160,          // building, x from -80 to 80
+    depth: 100,          // building, z from -50 to 50 (docks on the south wall, z = +50)
+    aisle: 3.4,          // very-narrow-aisle reach-truck aisle incl. clearance
+    rackDepth: 1.1,      // one pallet deep
+    slotLength: 1.35,    // one pallet position along the beam (1.2 m pallet + gap)
+    levelHeight: 1.7,    // beam pitch
+    palletHeight: 1.3,   // drawn pallet height
+    crossAisleZ: 32,     // main cross aisle in front of the storage blocks
+    chilledCorridorX: 52,// corridor between the DG store and the secure cage
+    chilledEntryZ: 2,    // corridor in front of the chilled chamber
+    dockZ: 50,
+  };
+
+  // ---------- Operating assumptions used in estimates ----------
+  const ASSUMPTIONS = {
+    forkliftSpeed_mps: 2.0,      // average incl. turns
+    handlingPerPallet_s: 75,     // scan, pick up, set down, confirm
+    liftPerLevel_s: 8,           // extra time per rack level above floor
+    maxPalletHeight_m: 1.6,      // incl. pallet base
+  };
+
+  // ---------- Zones and their rules ----------
+  const ZONES = [
+    {
+      id: 'A', name: 'Ambient', short: 'Ambient general goods',
+      temp: { min: 15, max: 30 }, levels: 4,
+      bounds: { x0: -78, x1: 20, z0: -48, z1: 30 },
+      maxKgByLevel: [1000, 1000, 800, 800],
+      occupancy: 0.74, docks: ['D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'D7'],
+      accepts: 'General non-hazardous goods (FMCG, apparel, auto parts, retail).',
+      features: ['Sprinklered (ESFR)', 'Reach-truck aisles 3.4 m'],
+    },
+    {
+      id: 'C', name: 'Chilled', short: 'Chilled 2–8 °C',
+      temp: { min: 2, max: 8 }, levels: 4,
+      bounds: { x0: 24, x1: 78, z0: -48, z1: -2 },
+      maxKgByLevel: [800, 800, 800, 800],
+      occupancy: 0.62, docks: ['D8', 'D9', 'D10'],
+      accepts: 'Pharma (GDP), vaccines, fresh food, dairy. Not frozen goods.',
+      features: ['Temperature-mapped chamber', '24/7 temperature logging', 'Reefer docks D8–D10'],
+    },
+    {
+      id: 'H', name: 'Dangerous goods', short: 'DG store (classes 3, 8, 9)',
+      temp: { min: 15, max: 30 }, levels: 3,
+      bounds: { x0: 24, x1: 50, z0: 6, z1: 30 },
+      maxKgByLevel: [800, 800, 800],
+      occupancy: 0.58, docks: ['D11'],
+      hazmatClasses: ['3', '8', '9'],
+      accepts: 'DG class 3 (flammable liquids), class 8 (corrosives), class 9 (misc., incl. lithium batteries).',
+      features: ['Spill containment', 'Fire-rated walls', 'Locked access'],
+    },
+    {
+      id: 'S', name: 'Secure cage', short: 'High-value secure cage',
+      temp: { min: 15, max: 30 }, levels: 3,
+      bounds: { x0: 54, x1: 78, z0: 6, z1: 30 },
+      maxKgByLevel: [600, 600, 600],
+      occupancy: 0.45, docks: ['D12'],
+      accepts: 'High-value goods: electronics, phones, luxury, pharma APIs (ambient).',
+      features: ['Mesh cage', 'CCTV', 'Access control with audit log'],
+    },
+  ];
+
+  const NOT_OFFERED = {
+    frozen: 'This site has no frozen (−18 °C) storage.',
+    hazmatClasses: 'DG classes 1, 2, 4, 5, 6 and 7 are not licensed at this site.',
+    chilledHazmat: 'There is no temperature-controlled DG store at this site.',
+  };
+
+  // 12 docks on the south wall, 12 m apart.
+  const DOCKS = Array.from({ length: 12 }, (_, i) => {
+    const id = 'D' + (i + 1);
+    const zone = ZONES.find(z => z.docks.includes(id)).id;
+    return {
+      id, x: -66 + i * 12, z: GEOM.dockZ, zone,
+      type: zone === 'C' ? 'Reefer dock, sealed shelter' : 'Dock leveller',
+    };
+  });
+
+  const SITE = {
+    id: 'DC-01',
+    name: 'Demo DC-01, Bhiwandi',
+    note: 'Fictional sample site for a concept prototype. Not real company data.',
+    area_m2: GEOM.width * GEOM.depth,
+  };
+
+  // ---------- Deterministic random numbers ----------
+  function mulberry32(seed) {
+    let a = seed >>> 0;
+    return function () {
+      a |= 0; a = (a + 0x6d2b79f5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  const pad = (n, w) => String(n).padStart(w, '0');
+
+  // ---------- Site generation ----------
+  function generateSlots(seed = 2026) {
+    const rnd = mulberry32(seed);
+    const slots = [];
+    for (const zone of ZONES) {
+      const { x0, x1, z0, z1 } = zone.bounds;
+      const pitch = 2 * GEOM.rackDepth + GEOM.aisle;
+      let x = x0 + GEOM.aisle;
+      let row = 1;
+      const rows = [];
+      while (x + 2 * GEOM.rackDepth + GEOM.aisle <= x1 + 1e-6) {
+        rows.push({ n: row++, x: x + GEOM.rackDepth / 2, aisleX: x - GEOM.aisle / 2 });
+        rows.push({ n: row++, x: x + GEOM.rackDepth * 1.5, aisleX: x + 2 * GEOM.rackDepth + GEOM.aisle / 2 });
+        x += pitch;
+      }
+      const bays = Math.floor((z1 - z0 - 2) / GEOM.slotLength);
+      // Existing clients fill blocks of bays, which looks like a real site.
+      for (const r of rows) {
+        let blockFull = rnd() < zone.occupancy;
+        for (let b = 1; b <= bays; b++) {
+          if (rnd() < 0.12) blockFull = rnd() < zone.occupancy;
+          const z = z0 + 1 + GEOM.slotLength * (b - 0.5);
+          for (let l = 1; l <= zone.levels; l++) {
+            let status = blockFull ? (rnd() < 0.93 ? 'occupied' : 'free') : (rnd() < 0.08 ? 'occupied' : 'free');
+            let note = '';
+            if (rnd() < 0.004) { status = 'blocked'; note = 'Beam damage, awaiting inspection'; }
+            slots.push({
+              id: `${zone.id}-${pad(r.n, 2)}-${pad(b, 3)}-${l}`,
+              zone: zone.id, row: r.n, bay: b, level: l,
+              x: +r.x.toFixed(2), z: +z.toFixed(3), aisleX: +r.aisleX.toFixed(2),
+              maxKg: zone.maxKgByLevel[l - 1], status, note,
+            });
+          }
+        }
+      }
+    }
+    return slots;
+  }
+
+  // ---------- CSV (the format a real WMS export would be mapped to) ----------
+  const CSV_COLUMNS = ['location_id', 'zone', 'row', 'bay', 'level', 'x_m', 'z_m', 'aisle_x_m', 'max_kg', 'status', 'note'];
+
+  function toCSV(slots) {
+    const esc = v => /[",\n]/.test(String(v)) ? '"' + String(v).replace(/"/g, '""') + '"' : String(v);
+    const lines = [CSV_COLUMNS.join(',')];
+    for (const s of slots) lines.push([s.id, s.zone, s.row, s.bay, s.level, s.x, s.z, s.aisleX, s.maxKg, s.status, s.note].map(esc).join(','));
+    return lines.join('\n');
+  }
+
+  function parseCSVLine(line) {
+    const out = []; let cur = ''; let q = false;
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      if (q) {
+        if (c === '"' && line[i + 1] === '"') { cur += '"'; i++; }
+        else if (c === '"') q = false;
+        else cur += c;
+      } else if (c === '"') q = true;
+      else if (c === ',') { out.push(cur); cur = ''; }
+      else cur += c;
+    }
+    out.push(cur);
+    return out;
+  }
+
+  /** Parse a slot CSV. Returns {slots, errors}. Rejects rows it cannot trust. */
+  function fromCSV(text) {
+    const lines = String(text).replace(/\r/g, '').split('\n').filter(l => l.trim());
+    if (!lines.length) return { slots: [], errors: ['The file is empty.'] };
+    const head = parseCSVLine(lines[0]).map(h => h.trim().toLowerCase());
+    const missing = CSV_COLUMNS.filter(c => c !== 'note' && !head.includes(c));
+    if (missing.length) return { slots: [], errors: ['Missing columns: ' + missing.join(', ')] };
+    const ix = Object.fromEntries(head.map((h, i) => [h, i]));
+    const slots = []; const errors = []; const seen = new Set();
+    for (let i = 1; i < lines.length; i++) {
+      const c = parseCSVLine(lines[i]);
+      const zone = (c[ix.zone] || '').trim().toUpperCase();
+      const s = {
+        id: (c[ix.location_id] || '').trim(), zone,
+        row: +c[ix.row], bay: +c[ix.bay], level: +c[ix.level],
+        x: +c[ix.x_m], z: +c[ix.z_m], aisleX: +c[ix.aisle_x_m], maxKg: +c[ix.max_kg],
+        status: (c[ix.status] || '').trim().toLowerCase(), note: ix.note != null ? (c[ix.note] || '') : '',
+      };
+      const bad = !s.id || !ZONES.some(z => z.id === zone) || ![s.row, s.bay, s.level, s.x, s.z, s.aisleX, s.maxKg].every(Number.isFinite)
+        || !['free', 'occupied', 'blocked'].includes(s.status) || seen.has(s.id);
+      if (bad) { if (errors.length < 20) errors.push(`Line ${i + 1}: skipped (invalid or duplicate)`); continue; }
+      seen.add(s.id); slots.push(s);
+    }
+    return { slots, errors };
+  }
+
+  // ---------- Geometry helpers ----------
+  const zoneById = id => ZONES.find(z => z.id === id);
+  const dockById = id => DOCKS.find(d => d.id === String(id).toUpperCase());
+
+  /** Walking path a forklift takes from a dock door to a slot (Manhattan, along aisles). */
+  function routePoints(dock, slot) {
+    const pts = [[dock.x, GEOM.dockZ], [dock.x, GEOM.crossAisleZ]];
+    if (slot.zone === 'C') {
+      pts.push([GEOM.chilledCorridorX, GEOM.crossAisleZ], [GEOM.chilledCorridorX, GEOM.chilledEntryZ],
+        [slot.aisleX, GEOM.chilledEntryZ], [slot.aisleX, slot.z]);
+    } else {
+      pts.push([slot.aisleX, GEOM.crossAisleZ], [slot.aisleX, slot.z]);
+    }
+    return pts;
+  }
+  function pathLength(pts) {
+    let d = 0;
+    for (let i = 1; i < pts.length; i++) d += Math.abs(pts[i][0] - pts[i - 1][0]) + Math.abs(pts[i][1] - pts[i - 1][1]);
+    return d;
+  }
+
+  const r1 = n => Math.round(n * 10) / 10;
+
+  /** Compress row numbers like [1,2,3,7,8] into "rows 01–03, 07–08". */
+  function rowRanges(zone, rows) {
+    const s = [...new Set(rows)].sort((a, b) => a - b);
+    const out = [];
+    for (let i = 0; i < s.length; i++) {
+      let j = i;
+      while (j + 1 < s.length && s[j + 1] === s[j] + 1) j++;
+      out.push(i === j ? `${zone}-${pad(s[i], 2)}` : `${zone}-${pad(s[i], 2)} to ${zone}-${pad(s[j], 2)}`);
+      i = j;
+    }
+    if (out.length > 3) return `${zone}-${pad(s[0], 2)} to ${zone}-${pad(s[s.length - 1], 2)} (${s.length} rows)`;
+    return out.join(', ');
+  }
+
+  function normalizeHazmat(v) {
+    if (v === null || v === undefined || v === false) return null;
+    const s = String(v).trim().toLowerCase();
+    if (!s || s === 'none' || s === 'null' || s === 'no' || s === 'false') return null;
+    const m = s.match(/(\d(?:\.\d)?)/);
+    return m ? m[1] : s;
+  }
+
+  // ---------- The model ----------
+  class WarehouseModel {
+    constructor(slots) {
+      this.load(slots || generateSlots());
+    }
+
+    load(slots) {
+      this.slots = slots;
+      this.byId = new Map(slots.map(s => [s.id, s]));
+      this.plans = [];
+      this.reserved = new Map(); // slotId -> planId
+      this.nextPlan = 1;
+    }
+
+    // --- read ---
+    zoneStatus() {
+      return ZONES.map(z => {
+        const zs = this.slots.filter(s => s.zone === z.id);
+        const count = st => zs.filter(s => s.status === st).length;
+        const reserved = zs.filter(s => this.reserved.has(s.id)).length;
+        const free = count('free') - reserved;
+        const total = zs.length;
+        return {
+          zone: z.id, name: z.name, temperature: `${z.temp.min}–${z.temp.max} °C`,
+          total_positions: total, occupied: count('occupied'), blocked: count('blocked'),
+          reserved_in_this_session: reserved, free_now: free,
+          utilisation_pct: total ? Math.round(((total - free) / total) * 100) : 0,
+          rack_levels: z.levels, max_kg_per_pallet: Math.max(...z.maxKgByLevel), docks: z.docks.join(', '),
+        };
+      });
+    }
+
+    siteSummary() {
+      const st = this.zoneStatus();
+      return {
+        site: SITE.name, note: SITE.note, building_m: `${GEOM.width} × ${GEOM.depth}`, area_m2: SITE.area_m2,
+        pallet_positions: this.slots.length, free_now: st.reduce((a, z) => a + z.free_now, 0),
+        docks: DOCKS.length, max_pallet_height_m: ASSUMPTIONS.maxPalletHeight_m,
+        zones: st,
+        not_offered: Object.values(NOT_OFFERED),
+      };
+    }
+
+    // --- rules ---
+    /** Decide which zone a request belongs to, or why none can take it. */
+    eligibility(req) {
+      const temp = String(req.temperature || 'ambient').toLowerCase();
+      const hz = normalizeHazmat(req.hazmat_class);
+      const kg = Number(req.weight_kg_per_pallet) || 500;
+      const h = Number(req.pallet_height_m) || 1.4;
+      const notes = [];
+      if (temp.includes('frozen') || temp.includes('-18') || temp.includes('−18')) {
+        return { ok: false, reason: NOT_OFFERED.frozen, suggestion: 'A partner frozen facility would be needed; chilled 2–8 °C is not suitable for frozen goods.' };
+      }
+      const chilled = /chill|cold|refriger|2\s*[-–]\s*8/.test(temp);
+      let zone;
+      if (hz) {
+        if (chilled) return { ok: false, reason: NOT_OFFERED.chilledHazmat };
+        if (!zoneById('H').hazmatClasses.includes(hz.split('.')[0])) {
+          return { ok: false, reason: `DG class ${hz} is not licensed here. ${NOT_OFFERED.hazmatClasses}` };
+        }
+        zone = 'H';
+        if (req.high_value) notes.push('DG rules take priority over the secure cage; the DG store has locked access.');
+      } else if (chilled) {
+        zone = 'C';
+        if (req.high_value) notes.push('The chilled chamber has CCTV but no mesh cage.');
+      } else if (req.high_value) {
+        zone = 'S';
+      } else {
+        zone = 'A';
+      }
+      const z = zoneById(zone);
+      const maxKg = Math.max(...z.maxKgByLevel);
+      if (kg > maxKg) return { ok: false, zone, reason: `${kg} kg per pallet exceeds the ${maxKg} kg beam limit in zone ${zone} (${z.name}).`, suggestion: 'Split loads to lighter pallets or use floor (block) storage, which is not modelled here.' };
+      if (h > ASSUMPTIONS.maxPalletHeight_m) return { ok: false, zone, reason: `Pallet height ${h} m exceeds the ${ASSUMPTIONS.maxPalletHeight_m} m slot clearance.`, suggestion: 'Re-stack pallets to 1.6 m or lower.' };
+      return { ok: true, zone, notes, kg };
+    }
+
+    // --- planning tools ---
+    findSpace(req) {
+      const pallets = Math.floor(Number(req.pallets));
+      if (!Number.isFinite(pallets) || pallets < 1) throw new Error('pallets must be a whole number of at least 1');
+      if (pallets > 20000) throw new Error('pallets is unrealistically large for one site (max 20000)');
+      const goods = String(req.goods || 'Client goods').slice(0, 80);
+      const el = this.eligibility(req);
+      if (!el.ok) return { eligible: false, goods, pallets_requested: pallets, reason: el.reason, suggestion: el.suggestion || null };
+
+      const zone = zoneById(el.zone);
+      const docks = zone.docks.map(dockById);
+      const candidates = [];
+      for (const s of this.slots) {
+        if (s.zone !== zone.id || s.status !== 'free' || this.reserved.has(s.id) || s.maxKg < el.kg) continue;
+        // Distance from the closest of the zone's docks.
+        let best = Infinity, bestDock = null;
+        for (const d of docks) { const len = pathLength(routePoints(d, s)); if (len < best) { best = len; bestDock = d; } }
+        candidates.push({ s, dist: best, dock: bestDock });
+      }
+      candidates.sort((a, b) => a.dist - b.dist || a.s.level - b.s.level || a.s.id.localeCompare(b.s.id));
+      const take = candidates.slice(0, pallets);
+      const id = 'P' + this.nextPlan++;
+      const dockCount = {};
+      take.forEach(c => { dockCount[c.dock.id] = (dockCount[c.dock.id] || 0) + 1; });
+      const dock = Object.entries(dockCount).sort((a, b) => b[1] - a[1])[0]?.[0] || zone.docks[0];
+      const avg = take.length ? take.reduce((a, c) => a + c.dist, 0) / take.length : 0;
+      const max = take.length ? take[take.length - 1].dist : 0;
+      const seconds = take.reduce((a, c) => a + (2 * c.dist) / ASSUMPTIONS.forkliftSpeed_mps + ASSUMPTIONS.handlingPerPallet_s + (c.s.level - 1) * ASSUMPTIONS.liftPerLevel_s, 0);
+      const levels = [...new Set(take.map(c => c.s.level))].sort();
+
+      const plan = {
+        plan_id: id, goods, zone: zone.id, zone_name: zone.name, temperature: `${zone.temp.min}–${zone.temp.max} °C`,
+        pallets_requested: pallets, pallets_reserved: take.length, shortfall: pallets - take.length,
+        rows: rowRanges(zone.id, take.map(c => c.s.row)), levels_used: levels.join(', '),
+        main_dock: dock, avg_travel_m: r1(avg), max_travel_m: r1(max),
+        putaway_forklift_hours: r1(seconds / 3600),
+        first_location: take[0]?.s.id || null, last_location: take[take.length - 1]?.s.id || null,
+        notes: el.notes,
+        weight_kg_per_pallet: el.kg,
+        hazmat_class: normalizeHazmat(req.hazmat_class), high_value: !!req.high_value,
+      };
+      if (plan.shortfall > 0) {
+        plan.notes = plan.notes.concat(`Only ${take.length} of ${pallets} pallets fit in zone ${zone.id} today.`);
+        plan.suggestion = 'Options: phased inbound as space frees up, or confirm whether part of the volume can go to another zone.';
+      }
+      plan._slots = take.map(c => c.s.id);
+      if (take.length) {
+        this.plans.push(plan);
+        take.forEach(c => this.reserved.set(c.s.id, id));
+      }
+      return Object.assign({ eligible: true }, this.publicPlan(plan));
+    }
+
+    publicPlan(p) {
+      const { _slots, ...rest } = p;
+      return rest;
+    }
+
+    getPlan(id) { return this.plans.find(p => p.plan_id === String(id).toUpperCase()); }
+
+    releasePlan(id) {
+      const p = this.getPlan(id);
+      if (!p) throw new Error(`No plan ${id}. Current plans: ${this.plans.map(x => x.plan_id).join(', ') || 'none'}`);
+      p._slots.forEach(s => this.reserved.delete(s));
+      this.plans = this.plans.filter(x => x !== p);
+      return { released: p.plan_id, pallets_freed: p._slots.length, zone: p.zone };
+    }
+
+    clearAll() {
+      const n = this.plans.length;
+      this.plans = []; this.reserved.clear();
+      return { cleared_plans: n };
+    }
+
+    /** Route from a dock to the middle of a plan's slots. */
+    planRoute(id, dockId) {
+      const p = this.getPlan(id);
+      if (!p) throw new Error(`No plan ${id}.`);
+      const dock = dockById(dockId || p.main_dock);
+      if (!dock) throw new Error(`Unknown dock ${dockId}. Docks are D1–D12.`);
+      if (!zoneById(p.zone).docks.includes(dock.id)) throw new Error(`Dock ${dock.id} does not serve zone ${p.zone}. Use ${zoneById(p.zone).docks.join(', ')}.`);
+      const mid = this.byId.get(p._slots[Math.floor(p._slots.length / 2)]);
+      const pts = routePoints(dock, mid);
+      const len = pathLength(pts);
+      return {
+        plan_id: p.plan_id, dock: dock.id, dock_type: dock.type, to_location: mid.id,
+        distance_m: r1(len), one_way_minutes: r1(len / ASSUMPTIONS.forkliftSpeed_mps / 60),
+        points: pts,
+      };
+    }
+
+    planSlots(id) { const p = this.getPlan(id); return p ? p._slots.map(s => this.byId.get(s)) : []; }
+
+    /** One pallet's trip for the "follow my pallet" animation: nearest slot of the plan, from the closest serving dock. */
+    journey(id) {
+      const p = this.getPlan(id);
+      if (!p) throw new Error(`No plan ${id}. Current plans: ${this.plans.map(x => x.plan_id).join(', ') || 'none'}`);
+      // Show a pallet going up high when one of the nearest positions is on an upper level (better to watch)
+      const near = p._slots.slice(0, 40).map(id => this.byId.get(id));
+      const top = Math.max(...near.map(x => x.level));
+      const slotIndex = Math.max(0, near.findIndex(x => x.level === top && x.level >= 3));
+      const slot = near[slotIndex];
+      const z = zoneById(p.zone);
+      let dock = null, pts = null, len = Infinity;
+      for (const d of z.docks.map(dockById)) {
+        const r = routePoints(d, slot), l = pathLength(r);
+        if (l < len) { len = l; pts = r; dock = d; }
+      }
+      const lift = 0.18 + (slot.level - 1) * GEOM.levelHeight;
+      const cycle = (2 * len) / ASSUMPTIONS.forkliftSpeed_mps + ASSUMPTIONS.handlingPerPallet_s + (slot.level - 1) * ASSUMPTIONS.liftPerLevel_s;
+      return {
+        plan_id: p.plan_id, goods: p.goods, dock: dock.id, dock_type: dock.type, location: slot.id,
+        zone: z.id, zone_name: z.name, temperature: `${z.temp.min}–${z.temp.max} °C`,
+        level: slot.level, lift_height_m: r1(lift), distance_m: r1(len),
+        one_way_minutes: r1(len / ASSUMPTIONS.forkliftSpeed_mps / 60), cycle_seconds: Math.round(cycle),
+        pallets_in_plan: p.pallets_reserved, putaway_forklift_hours: p.putaway_forklift_hours,
+        points: pts, slot, slot_index: slotIndex,
+      };
+    }
+
+    reportData(clientName) {
+      const plans = this.plans.map(p => this.publicPlan(p));
+      return {
+        client: String(clientName || 'Prospective client').slice(0, 80), site: SITE.name, note: SITE.note,
+        plans,
+        total_pallets_reserved: plans.reduce((a, p) => a + p.pallets_reserved, 0),
+        total_shortfall: plans.reduce((a, p) => a + p.shortfall, 0),
+        total_putaway_forklift_hours: r1(plans.reduce((a, p) => a + p.putaway_forklift_hours, 0)),
+        assumptions: `Forklift ${ASSUMPTIONS.forkliftSpeed_mps} m/s, ${ASSUMPTIONS.handlingPerPallet_s} s handling per pallet, +${ASSUMPTIONS.liftPerLevel_s} s per level above floor.`,
+      };
+    }
+  }
+
+  return {
+    GEOM, ASSUMPTIONS, ZONES, DOCKS, SITE, NOT_OFFERED, CSV_COLUMNS,
+    generateSlots, toCSV, fromCSV, routePoints, pathLength, normalizeHazmat,
+    zoneById, dockById, WarehouseModel,
+  };
+});
+
+</script>
+<script>
+/*
+ * 3D viewer — draws the warehouse FROM the data in WarehouseCore.
+ * Nothing here is hand-placed: racks, pallets, docks and zones all come
+ * from the model, so a different site file draws a different warehouse.
+ *
+ * Needs THREE (r128) and THREE.OrbitControls loaded first.
+ */
+(function (root) {
+  'use strict';
+  const W = root.WarehouseCore;
+
+  const css = (name, el) => getComputedStyle(el || document.documentElement).getPropertyValue(name).trim() || '#888';
+  const reduceMotion = () => window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const ease = t => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+  const lowPower = () => window.innerWidth < 760 || (navigator.hardwareConcurrency || 8) <= 4;
+
+  // ---------- Procedural textures (no image files needed) ----------
+  function lcg(seed) { let x = seed; return () => (x = (x * 1664525 + 1013904223) % 4294967296) / 4294967296; }
+  function canvasTex(w, h, draw) {
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    draw(c.getContext('2d'), w, h);
+    const t = new THREE.CanvasTexture(c);
+    t.encoding = THREE.sRGBEncoding; t.anisotropy = 4;
+    return t;
+  }
+  // Polished concrete: speckle, a few stains, saw-cut joints at the tile edge (tinted by the floor colour)
+  function floorTexture() {
+    const rnd = lcg(11);
+    const t = canvasTex(512, 512, (g, w, h) => {
+      g.fillStyle = '#e4e4e4'; g.fillRect(0, 0, w, h);
+      for (let i = 0; i < 7; i++) {
+        const x = rnd() * w, y = rnd() * h, r = 40 + rnd() * 120;
+        const gr = g.createRadialGradient(x, y, 0, x, y, r);
+        gr.addColorStop(0, 'rgba(120,120,120,0.10)'); gr.addColorStop(1, 'rgba(120,120,120,0)');
+        g.fillStyle = gr; g.fillRect(0, 0, w, h);
+      }
+      for (let i = 0; i < 9000; i++) { const v = (170 + rnd() * 70) | 0; g.fillStyle = `rgba(${v},${v},${v},0.35)`; g.fillRect(rnd() * w, rnd() * h, 1 + rnd() * 1.5, 1 + rnd() * 1.5); }
+      g.strokeStyle = 'rgba(80,80,80,0.55)'; g.lineWidth = 2; g.strokeRect(1, 1, w - 2, h - 2);
+    });
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.repeat.set(W.GEOM.width / 7.5, W.GEOM.depth / 7.5);
+    return t;
+  }
+  // A shrink-wrapped carton on a wooden pallet: tape, a shipping label with a barcode, slats below
+  function palletTexture(hex) {
+    return canvasTex(256, 256, (g, w, h) => {
+      const base = h * 0.86;
+      g.fillStyle = hex; g.fillRect(0, 0, w, base);
+      const sh = g.createLinearGradient(0, 0, w, 0);
+      sh.addColorStop(0, 'rgba(0,0,0,0.16)'); sh.addColorStop(0.08, 'rgba(0,0,0,0)'); sh.addColorStop(0.92, 'rgba(0,0,0,0)'); sh.addColorStop(1, 'rgba(0,0,0,0.16)');
+      g.fillStyle = sh; g.fillRect(0, 0, w, base);
+      g.fillStyle = 'rgba(0,0,0,0.10)'; g.fillRect(0, base * 0.5 - 1, w, 2);          // carton seam
+      g.fillStyle = 'rgba(255,255,255,0.22)'; g.fillRect(w * 0.44, 0, w * 0.12, base); // tape
+      g.fillStyle = '#f6f6f2'; g.fillRect(w * 0.12, base * 0.6, w * 0.3, base * 0.24); // label
+      g.fillStyle = '#222';
+      for (let i = 0; i < 18; i++) g.fillRect(w * 0.14 + i * 3.6, base * 0.66, i % 3 ? 1.4 : 2.4, base * 0.12);
+      g.fillStyle = '#6e4f33'; g.fillRect(0, base, w, h - base);                      // pallet
+      g.fillStyle = '#3a2a1c';
+      for (const x of [0.18, 0.5, 0.82]) g.fillRect(w * x - 18, base + 8, 36, h - base - 8);
+    });
+  }
+  class WarehouseViewer {
+    constructor(container, model, opts = {}) {
+      this.el = container;
+      this.model = model;
+      this.opts = opts;
+      this.planMeshes = new Map(); // planId -> {mesh, color}
+      this.routes = new Map();     // planId -> route
+      this.labels = [];
+      this.flight = null;
+      this.clock = new THREE.Clock();
+      this.hooks = [];            // per-frame callbacks (dt, t) from the immersive layer
+      this.manualCamera = false;  // true while walking or in a cinematic
+      this.hq = !lowPower();
+
+      const r = this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+      r.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      r.outputEncoding = THREE.sRGBEncoding;
+      r.toneMapping = THREE.ACESFilmicToneMapping;
+      r.toneMappingExposure = 1.05;
+      if (this.hq) { r.shadowMap.enabled = true; r.shadowMap.type = THREE.PCFSoftShadowMap; }
+      container.appendChild(r.domElement);
+      r.domElement.setAttribute('aria-label', '3D view of the warehouse. Drag to rotate, scroll to zoom, right-drag to pan.');
+      r.domElement.setAttribute('role', 'img');
+
+      this.labelLayer = document.createElement('div');
+      this.labelLayer.className = 'scene-labels';
+      container.appendChild(this.labelLayer);
+
+      this.scene = new THREE.Scene();
+      this.camera = new THREE.PerspectiveCamera(42, 1, 0.5, 900);
+      this.camera.position.set(30, 105, 150);
+      this.controls = new THREE.OrbitControls(this.camera, r.domElement);
+      this.controls.target.set(0, 0, -4);
+      this.controls.enableDamping = true;
+      this.controls.dampingFactor = 0.08;
+      this.controls.maxPolarAngle = 1.42;
+      this.controls.minDistance = 12;
+      this.controls.maxDistance = 300;
+      this.controls.addEventListener('start', () => { this.flight = null; });
+
+      this.hemi = new THREE.HemisphereLight(0xffffff, 0x8a8f99, 0.9);
+      this.scene.add(this.hemi);
+      const sun = this.sun = new THREE.DirectionalLight(0xfff4e0, 0.75);
+      sun.position.set(-50, 110, 70);
+      if (this.hq) {
+        sun.castShadow = true;
+        sun.shadow.mapSize.set(2048, 2048);
+        Object.assign(sun.shadow.camera, { left: -95, right: 95, top: 75, bottom: -75, near: 10, far: 300 });
+        sun.shadow.bias = -0.0008;
+        sun.shadow.normalBias = 0.04;
+      }
+      this.scene.add(sun);
+
+      this.build();
+      this.applyTheme();
+      this.bindPicking();
+
+      const ro = new ResizeObserver(() => this.resize());
+      ro.observe(container);
+      this.resize();
+      this.flight = null; this.focus('overview'); if (this.flight) { const f = this.flight; this.controls.target.copy(f.toT); this.camera.position.copy(f.toP); this.flight = null; }
+      const mq = window.matchMedia('(prefers-color-scheme: dark)');
+      mq.addEventListener && mq.addEventListener('change', () => this.applyTheme());
+      new MutationObserver(() => this.applyTheme()).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+
+      const loop = () => { this.frame(); this.raf = requestAnimationFrame(loop); };
+      loop();
+    }
+
+    // ---------- Build the static site ----------
+    build() {
+      if (this.site) { this.scene.remove(this.site); this.disposeTree(this.site); }
+      this.labels.forEach(l => l.el.remove());
+      this.labels = [];
+      const g = this.site = new THREE.Group();
+      this.scene.add(g);
+      const G = W.GEOM;
+      this.mats = {};
+      const mat = (key, extra) => (this.mats[key] = new THREE.MeshLambertMaterial(Object.assign({ color: 0x888888 }, extra)));
+
+      // Floor and yard
+      this.floorTex = this.floorTex || floorTexture();
+      const floor = new THREE.Mesh(new THREE.PlaneGeometry(G.width, G.depth), mat('floor', { map: this.floorTex }));
+      floor.receiveShadow = true;
+      floor.rotation.x = -Math.PI / 2;
+      g.add(floor);
+      const yard = new THREE.Mesh(new THREE.PlaneGeometry(G.width + 60, 40), mat('yard'));
+      yard.rotation.x = -Math.PI / 2; yard.position.set(0, -0.02, G.depth / 2 + 20);
+      g.add(yard);
+
+      // Zone floor tints + outlines
+      for (const z of W.ZONES) {
+        const b = z.bounds, w = b.x1 - b.x0, d = b.z1 - b.z0;
+        const tint = new THREE.Mesh(new THREE.PlaneGeometry(w, d), mat('zone' + z.id, { transparent: true, opacity: 0.22 }));
+        tint.rotation.x = -Math.PI / 2; tint.position.set(b.x0 + w / 2, 0.02, b.z0 + d / 2);
+        g.add(tint);
+        const h = z.id === 'A' ? 0.05 : 7.5; // chilled chamber, DG store and cage have walls
+        const box = new THREE.BoxGeometry(w, h, d);
+        const edges = new THREE.LineSegments(new THREE.EdgesGeometry(box), new THREE.LineBasicMaterial({ transparent: true, opacity: 0.85 }));
+        edges.position.set(b.x0 + w / 2, h / 2, b.z0 + d / 2);
+        edges.userData.zone = z.id;
+        g.add(edges);
+        (this.zoneEdges || (this.zoneEdges = {}))[z.id] = edges;
+        if (z.id !== 'A') {
+          const wall = new THREE.Mesh(box, mat('wall' + z.id, { transparent: true, opacity: z.id === 'S' ? 0.05 : 0.09, depthWrite: false, side: THREE.DoubleSide }));
+          wall.position.copy(edges.position);
+          g.add(wall);
+        }
+        this.addLabel(`<b>${z.id}</b> ${z.name}<span>${z.temp.min}–${z.temp.max} °C</span>`, new THREE.Vector3(b.x0 + w / 2, z.id === 'A' ? 9 : 10, b.z0 + d / 2), 'zone zone-' + z.id);
+      }
+
+      // Safety-yellow walkway lines along the cross aisle and the chilled corridor
+      const lineMat = mat('marking');
+      const stripe = (x, z, w, d) => { const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), lineMat); m.rotation.x = -Math.PI / 2; m.position.set(x, 0.04, z); g.add(m); };
+      stripe(0, G.crossAisleZ - 1.6, 156, 0.18); stripe(0, G.crossAisleZ + 1.6, 156, 0.18);
+      stripe(G.chilledCorridorX - 1.2, 17, 0.18, 30); stripe(G.chilledCorridorX + 1.2, 17, 0.18, 30);
+
+      // Perimeter walls (low, see-through) with dock doors on the south wall
+      const wallMat = mat('perimeter', { transparent: true, opacity: 0.18, depthWrite: false });
+      const wallH = 3;
+      const addWall = (x, z, w, d) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, wallH, d), wallMat); m.position.set(x, wallH / 2, z); g.add(m); };
+      addWall(0, -G.depth / 2, G.width, 0.3); addWall(-G.width / 2, 0, 0.3, G.depth); addWall(G.width / 2, 0, 0.3, G.depth);
+      const doorW = 3.6;
+      let x = -G.width / 2;
+      for (const d of W.DOCKS) {
+        const left = d.x - doorW / 2;
+        addWall((x + left) / 2, G.depth / 2, left - x, 0.3);
+        x = d.x + doorW / 2;
+        const door = new THREE.Mesh(new THREE.BoxGeometry(doorW, 3.4, 0.2), mat(d.zone === 'C' ? 'doorReefer' : 'door'));
+        door.position.set(d.x, 1.7, G.depth / 2 + 0.1);
+        g.add(door);
+        const lev = new THREE.Mesh(new THREE.BoxGeometry(doorW, 0.25, 3), this.mats.door);
+        lev.position.set(d.x, 0.12, G.depth / 2 + 1.6);
+        g.add(lev);
+        this.addLabel(d.id, new THREE.Vector3(d.x, 4.6, G.depth / 2 + 1), 'dock' + (d.zone === 'C' ? ' reefer' : ''));
+      }
+      addWall((x + G.width / 2) / 2, G.depth / 2, G.width / 2 - x, 0.3);
+
+      this.buildRacks(g);
+      this.buildPallets();
+    }
+
+    buildRacks(g) {
+      const G = W.GEOM;
+      const rows = new Map();
+      for (const s of this.model.slots) {
+        const k = s.zone + s.row;
+        const r = rows.get(k) || { x: s.x, z0: Infinity, z1: -Infinity, levels: 0 };
+        r.z0 = Math.min(r.z0, s.z); r.z1 = Math.max(r.z1, s.z); r.levels = Math.max(r.levels, s.level);
+        rows.set(k, r);
+      }
+      const up = [], beams = [];
+      this.rackBoxes = [];
+      for (const r of rows.values()) {
+        const zStart = r.z0 - G.slotLength / 2, zEnd = r.z1 + G.slotLength / 2;
+        this.rackBoxes.push({ x0: r.x - G.rackDepth / 2, x1: r.x + G.rackDepth / 2, z0: zStart, z1: zEnd });
+        const height = r.levels * G.levelHeight + 0.4;
+        const n = Math.round((zEnd - zStart) / (G.slotLength * 3));
+        for (let i = 0; i <= n; i++) {
+          const z = zStart + (i * (zEnd - zStart)) / n;
+          up.push([r.x - G.rackDepth / 2 + 0.05, height / 2, z, height]);
+          up.push([r.x + G.rackDepth / 2 - 0.05, height / 2, z, height]);
+        }
+        for (let l = 0; l < r.levels; l++) {
+          const y = 0.1 + l * G.levelHeight + (l ? 0 : -0.05);
+          if (l === 0) continue; // floor level sits on the floor
+          beams.push([r.x - G.rackDepth / 2 + 0.05, y, (zStart + zEnd) / 2, zEnd - zStart]);
+          beams.push([r.x + G.rackDepth / 2 - 0.05, y, (zStart + zEnd) / 2, zEnd - zStart]);
+        }
+        // top beam
+        const yTop = 0.1 + r.levels * G.levelHeight;
+        beams.push([r.x - G.rackDepth / 2 + 0.05, yTop, (zStart + zEnd) / 2, zEnd - zStart]);
+        beams.push([r.x + G.rackDepth / 2 - 0.05, yTop, (zStart + zEnd) / 2, zEnd - zStart]);
+      }
+      const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3();
+      const upMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(0.09, 1, 0.09), this.mats.upright || (this.mats.upright = new THREE.MeshLambertMaterial()), up.length);
+      up.forEach((u, i) => { p.set(u[0], u[1], u[2]); s.set(1, u[3], 1); upMesh.setMatrixAt(i, m4.compose(p, q, s)); });
+      const beamMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(0.08, 0.14, 1), this.mats.beam || (this.mats.beam = new THREE.MeshLambertMaterial()), beams.length);
+      beams.forEach((b, i) => { p.set(b[0], b[1], b[2]); s.set(1, 1, b[3]); beamMesh.setMatrixAt(i, m4.compose(p, q, s)); });
+      for (const m of [upMesh, beamMesh]) { m.castShadow = true; m.receiveShadow = true; }
+      g.add(upMesh, beamMesh);
+    }
+
+    palletMatrix(slot, m4) {
+      const G = W.GEOM;
+      const p = new THREE.Vector3(slot.x, 0.18 + (slot.level - 1) * G.levelHeight + G.palletHeight / 2, slot.z);
+      return m4.compose(p, new THREE.Quaternion(), new THREE.Vector3(1, 1, 1));
+    }
+
+    buildPallets() {
+      ['occMesh', 'blockMesh'].forEach(k => { if (this[k]) { this.site.remove(this[k]); this[k].geometry.dispose(); } });
+      const geo = new THREE.BoxGeometry(1.0, W.GEOM.palletHeight, 1.15);
+      const occ = this.model.slots.filter(s => s.status === 'occupied');
+      const blk = this.model.slots.filter(s => s.status === 'blocked');
+      this.mats.pallet = this.mats.pallet || new THREE.MeshLambertMaterial({ color: 0xffffff });
+      this.mats.blocked = this.mats.blocked || new THREE.MeshLambertMaterial();
+      const m4 = new THREE.Matrix4();
+      const occMesh = this.occMesh = new THREE.InstancedMesh(geo, this.mats.pallet, occ.length);
+      const c = new THREE.Color();
+      let seed = 7;
+      occ.forEach((s, i) => {
+        occMesh.setMatrixAt(i, this.palletMatrix(s, m4));
+        seed = (seed * 9301 + 49297) % 233280;
+        const v = 0.86 + (seed / 233280) * 0.2; // cardboard tone variation
+        occMesh.setColorAt(i, c.setScalar(v));
+      });
+      occMesh.userData.slots = occ;
+      const blockMesh = this.blockMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1.0, 0.25, 1.15), this.mats.blocked, Math.max(1, blk.length));
+      blk.forEach((s, i) => { const mm = this.palletMatrix(s, m4); mm.elements[13] -= W.GEOM.palletHeight / 2 - 0.15; blockMesh.setMatrixAt(i, mm); });
+      blockMesh.count = blk.length;
+      blockMesh.userData.slots = blk;
+      occMesh.castShadow = true; occMesh.receiveShadow = true;
+      this.site.add(occMesh, blockMesh);
+    }
+
+    rebuild() {
+      this.clearPlans();
+      this.build();
+      this.applyTheme();
+    }
+
+    // ---------- Theme ----------
+    applyTheme() {
+      const set = (k, v) => this.mats[k] && this.mats[k].color.set(v);
+      this.renderer.setClearColor(new THREE.Color(css('--scene-bg')), 1);
+      set('floor', css('--scene-floor')); set('yard', css('--scene-yard'));
+      set('marking', css('--safety')); set('perimeter', css('--scene-wall'));
+      set('door', css('--scene-door')); set('doorReefer', css('--zone-C'));
+      set('upright', css('--rack-upright')); set('beam', css('--rack-beam'));
+      set('blocked', css('--critical'));
+      const pc = css('--pallet');
+      if (this.palletHex !== pc) {
+        this.palletHex = pc;
+        if (this.mats.pallet.map) this.mats.pallet.map.dispose();
+        this.mats.pallet.map = palletTexture(pc);
+        this.mats.pallet.color.set(0xffffff);
+        this.mats.pallet.needsUpdate = true;
+      }
+      this.planTex = this.planTex || palletTexture('#f2f2f2');
+      for (const z of W.ZONES) {
+        set('zone' + z.id, css('--zone-' + z.id)); set('wall' + z.id, css('--zone-' + z.id));
+        if (this.zoneEdges && this.zoneEdges[z.id]) this.zoneEdges[z.id].material.color.set(css('--zone-' + z.id));
+      }
+      for (const [, pm] of this.planMeshes) pm.mesh.material.color.set(css(pm.colorVar)), pm.mesh.material.emissive.set(css(pm.colorVar));
+      for (const [, r] of this.routes) r.mat.color.set(css(r.colorVar)), r.marker.material.color.set(css(r.colorVar));
+    }
+
+    // ---------- Plans (reserved slots) ----------
+    showPlan(planId, slots, colorVar) {
+      this.removePlan(planId);
+      const mat = new THREE.MeshLambertMaterial({ color: css(colorVar), emissive: css(colorVar), emissiveIntensity: 0.35, map: this.planTex || null });
+      const mesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1.04, W.GEOM.palletHeight + 0.04, 1.19), mat, slots.length);
+      const m4 = new THREE.Matrix4();
+      slots.forEach((s, i) => mesh.setMatrixAt(i, this.palletMatrix(s, m4)));
+      mesh.userData.slots = slots; mesh.userData.planId = planId;
+      mesh.castShadow = true;
+      this.scene.add(mesh);
+      this.planMeshes.set(planId, { mesh, colorVar, born: this.clock.getElapsedTime() });
+    }
+
+    removePlan(planId) {
+      const pm = this.planMeshes.get(planId);
+      if (pm) { this.scene.remove(pm.mesh); pm.mesh.geometry.dispose(); pm.mesh.material.dispose(); this.planMeshes.delete(planId); }
+      const r = this.routes.get(planId);
+      if (r) { this.scene.remove(r.group); this.disposeTree(r.group); this.routes.delete(planId); }
+    }
+
+    clearPlans() { [...this.planMeshes.keys(), ...this.routes.keys()].forEach(id => this.removePlan(id)); }
+
+    drawRoute(planId, points, colorVar) {
+      const old = this.routes.get(planId);
+      if (old) { this.scene.remove(old.group); this.disposeTree(old.group); }
+      const group = new THREE.Group();
+      const mat = new THREE.MeshBasicMaterial({ color: css(colorVar) });
+      const segs = [];
+      let total = 0;
+      for (let i = 1; i < points.length; i++) {
+        const [x0, z0] = points[i - 1], [x1, z1] = points[i];
+        const len = Math.abs(x1 - x0) + Math.abs(z1 - z0);
+        if (len < 0.01) continue;
+        const horiz = Math.abs(x1 - x0) > Math.abs(z1 - z0);
+        const m = new THREE.Mesh(new THREE.BoxGeometry(horiz ? len + 0.7 : 0.7, 0.06, horiz ? 0.7 : len + 0.7), mat);
+        m.position.set((x0 + x1) / 2, 0.08, (z0 + z1) / 2);
+        group.add(m);
+        segs.push({ x0, z0, x1, z1, len, start: total });
+        total += len;
+      }
+      const end = points[points.length - 1];
+      const pin = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 0.9, 0.12, 24), mat);
+      pin.position.set(end[0], 0.1, end[1]);
+      group.add(pin);
+      // A small forklift marker that drives the route, so the flow is visible
+      const marker = new THREE.Mesh(new THREE.BoxGeometry(1.3, 1.1, 2.0), new THREE.MeshLambertMaterial({ color: css(colorVar) }));
+      marker.position.set(points[0][0], 0.6, points[0][1]);
+      group.add(marker);
+      this.scene.add(group);
+      this.routes.set(planId, { group, mat, marker, segs, total, colorVar, t0: this.clock.getElapsedTime() });
+    }
+
+    // ---------- Camera ----------
+    flyTo(target, position) {
+      if (reduceMotion()) { this.controls.target.copy(target); this.camera.position.copy(position); return; }
+      this.flight = { t0: performance.now(), dur: 1200, fromT: this.controls.target.clone(), fromP: this.camera.position.clone(), toT: target, toP: position };
+    }
+
+    focusBox(x0, x1, z0, z1, h = 6) {
+      const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
+      // Fit the box to the camera's field of view, whatever the screen shape.
+      const vfov = (this.camera.fov * Math.PI) / 180;
+      const hfov = 2 * Math.atan(Math.tan(vfov / 2) * (this.camera.aspect || 1.5));
+      const distW = (x1 - x0) / 2 / Math.tan(hfov / 2);
+      const distD = ((z1 - z0) / 2 / Math.tan(vfov / 2)) * 1.25;
+      const dist = Math.max(distW, distD, 22) * 1.06;
+      const dir = new THREE.Vector3(0.18, 0.74, 0.65).normalize();
+      this.flyTo(new THREE.Vector3(cx, h / 2, cz), new THREE.Vector3(cx + dir.x * dist, dir.y * dist, cz + dir.z * dist));
+    }
+
+    focus(target) {
+      if (this.beforeFocus) this.beforeFocus();
+      const t = String(target || 'overview').toUpperCase();
+      if (t === 'OVERVIEW' || t === 'SITE') return this.focusBox(-82, 82, -52, 56, 0), 'overview';
+      if (t === 'DOCKS') return this.focusBox(-70, 70, 34, 56, 2), 'docks';
+      const z = W.zoneById(t);
+      if (z) { const b = z.bounds; this.focusBox(b.x0, b.x1, b.z0, b.z1); return 'zone ' + z.id; }
+      const d = W.dockById(t);
+      if (d) { this.flyTo(new THREE.Vector3(d.x, 2, d.z - 12), new THREE.Vector3(d.x + 8, 16, d.z + 22)); return 'dock ' + d.id; }
+      const pm = this.planMeshes.get(t);
+      if (pm) { this.focusSlots(pm.mesh.userData.slots); return 'plan ' + t; }
+      throw new Error(`Unknown camera target "${target}". Use overview, docks, a zone (A, C, H, S), a dock (D1–D12) or a plan id.`);
+    }
+
+    /** True if focus(target) would work — lets the agent's tour tool validate targets first. */
+    canFocus(target) {
+      const t = String(target || '').toUpperCase();
+      return ['OVERVIEW', 'SITE', 'DOCKS'].includes(t) || !!W.zoneById(t) || !!W.dockById(t) || this.planMeshes.has(t);
+    }
+
+    focusSlots(slots) {
+      if (!slots.length) return;
+      let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+      for (const s of slots) { x0 = Math.min(x0, s.x); x1 = Math.max(x1, s.x); z0 = Math.min(z0, s.z); z1 = Math.max(z1, s.z); }
+      this.focusBox(x0 - 4, x1 + 4, z0 - 4, z1 + 4);
+    }
+
+    // ---------- Labels ----------
+    addLabel(html, pos, cls) {
+      const el = document.createElement('div');
+      el.className = 'scene-label ' + cls;
+      el.innerHTML = html;
+      this.labelLayer.appendChild(el);
+      this.labels.push({ el, pos });
+    }
+
+    placeLabels() {
+      const w = this.el.clientWidth, h = this.el.clientHeight;
+      const v = new THREE.Vector3();
+      const camDist = this.camera.position.distanceTo(this.controls.target);
+      for (const l of this.labels) {
+        v.copy(l.pos).project(this.camera);
+        const hide = v.z > 1 || v.x < -1.1 || v.x > 1.1 || v.y < -1.1 || v.y > 1.1 || (l.el.classList.contains('dock') && camDist > 230);
+        l.el.style.display = hide ? 'none' : '';
+        if (!hide) l.el.style.transform = `translate(-50%,-50%) translate(${((v.x + 1) / 2) * w}px,${((1 - v.y) / 2) * h}px)`;
+      }
+    }
+
+    // ---------- Picking ----------
+    bindPicking() {
+      const ray = new THREE.Raycaster();
+      const ptr = new THREE.Vector2();
+      let down = null;
+      this.renderer.domElement.addEventListener('pointerdown', e => { down = [e.clientX, e.clientY]; });
+      this.renderer.domElement.addEventListener('pointerup', e => {
+        if (!down || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 5) return;
+        const rect = this.renderer.domElement.getBoundingClientRect();
+        ptr.set(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
+        ray.setFromCamera(ptr, this.camera);
+        const targets = [this.occMesh, this.blockMesh, ...[...this.planMeshes.values()].map(p => p.mesh)];
+        const hit = ray.intersectObjects(targets, false)[0];
+        const slot = hit && hit.instanceId != null ? hit.object.userData.slots[hit.instanceId] : null;
+        this.opts.onSelect && this.opts.onSelect(slot, hit ? hit.object.userData.planId : null, e);
+      });
+    }
+
+    // ---------- Loop ----------
+    resize() {
+      const w = this.el.clientWidth || 1, h = this.el.clientHeight || 1;
+      this.renderer.setSize(w, h, false);
+      this.renderer.domElement.style.width = '100%';
+      this.renderer.domElement.style.height = '100%';
+      this.camera.aspect = w / h;
+      this.camera.updateProjectionMatrix();
+    }
+
+    frame() {
+      if (document.hidden) return;
+      const t = this.clock.getElapsedTime();
+      if (this.flight && !this.manualCamera) {
+        const f = this.flight, k = Math.min(1, (performance.now() - f.t0) / f.dur), e = ease(k);
+        this.controls.target.lerpVectors(f.fromT, f.toT, e);
+        this.camera.position.lerpVectors(f.fromP, f.toP, e);
+        if (k >= 1) this.flight = null;
+      }
+      const dt = Math.min(0.25, t - (this.lastT || t)); this.lastT = t;
+      // Adaptive quality: if frames are slow for a while, drop shadows and pixel density
+      this.ft = (this.ft || 0) * 0.97 + dt * 0.03;
+      if (this.hq && t > 4 && this.ft > 0.045) {
+        this.hq = false;
+        this.renderer.shadowMap.enabled = false; this.sun.castShadow = false;
+        this.renderer.setPixelRatio(1); this.resize();
+        this.scene.traverse(o => { if (o.material) [].concat(o.material).forEach(m => (m.needsUpdate = true)); });
+      }
+      for (const h of this.hooks) h(dt, t);
+      const still = reduceMotion();
+      for (const [, pm] of this.planMeshes) pm.mesh.material.emissiveIntensity = still ? 0.35 : 0.3 + 0.22 * Math.sin((t - pm.born) * 3);
+      for (const [, r] of this.routes) {
+        if (!r.total) continue;
+        const d = still ? r.total : ((t - r.t0) * 14) % (r.total + 10);
+        const dist = Math.min(d, r.total);
+        const seg = r.segs.find(s => dist <= s.start + s.len) || r.segs[r.segs.length - 1];
+        const k = (dist - seg.start) / seg.len;
+        r.marker.position.set(seg.x0 + (seg.x1 - seg.x0) * k, 0.6, seg.z0 + (seg.z1 - seg.z0) * k);
+        r.marker.rotation.y = Math.abs(seg.x1 - seg.x0) > Math.abs(seg.z1 - seg.z0) ? Math.PI / 2 : 0;
+      }
+      if (!this.manualCamera) this.controls.update();
+      this.renderer.render(this.scene, this.camera);
+      this.placeLabels();
+    }
+
+    disposeTree(obj) {
+      obj.traverse(o => { if (o.geometry) o.geometry.dispose(); });
+    }
+  }
+
+  root.WarehouseViewer = WarehouseViewer;
+})(typeof self !== 'undefined' ? self : this);
+
+</script>
+<script>
+/*
+ * Immersive layer on top of the 3D viewer:
+ *  - a living site: roof and lights (seen from inside), trucks at the docks, forklifts at work
+ *  - Walk inside: eye-level walking with collisions and a "you are here" readout
+ *  - Follow my pallet: a cinematic truck-to-shelf journey with captions from the data
+ *  - Guided tour: camera stops with captions, read aloud when sound is on
+ *  - Sound: synthesized warehouse ambience and reversing beepers (no audio files)
+ * Every caption is built from model data, so the experience stays as traceable as the chat.
+ */
+(function (root) {
+  'use strict';
+  const W = root.WarehouseCore;
+  const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim() || '#888888';
+  const reduceMotion = () => window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  const smooth = k => k * k * (3 - 2 * k);
+  const fmt = n => Number(n).toLocaleString('en-IN');
+
+  // ---------- Models ----------
+  const lam = (c, extra) => new THREE.MeshLambertMaterial(Object.assign({ color: c }, extra));
+  let M = null;
+  function mats() {
+    if (M) return M;
+    M = {
+      body: lam(0xf0b400), dark: lam(0x2b2f36), steel: lam(0x8a9099), tyre: lam(0x1c1c1c),
+      vest: lam(0xd8f000, { emissive: 0x303800 }), skin: lam(0xc68e63), beacon: lam(0xff8a00, { emissive: 0xff6a00 }),
+      trailer: lam(0xe9ebee), stripe: lam(0x2f5b8c), cab: lam(0x34506e), glass: lam(0x1d2733),
+      roof: lam(0x59616c, { side: THREE.DoubleSide }), light: new THREE.MeshBasicMaterial({ color: 0xfff6e0 }),
+    };
+    return M;
+  }
+  function box(w, h, d, mat, x, y, z, shadow = true) {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+    m.position.set(x, y, z);
+    m.castShadow = shadow; m.receiveShadow = shadow;
+    return m;
+  }
+
+  /** Counterbalance forklift with driver; faces -z. userData.carriage moves the forks up. */
+  function makeForklift() {
+    const m = mats();
+    const g = new THREE.Group();
+    g.add(box(1.15, 0.85, 1.5, m.body, 0, 0.72, 0.1));
+    g.add(box(1.15, 0.75, 0.45, m.dark, 0, 0.72, 0.95));
+    for (const [x, z] of [[-0.52, -0.45], [0.52, -0.45], [-0.52, 0.72], [0.52, 0.72]]) g.add(box(0.07, 1.25, 0.07, m.dark, x, 1.75, z));
+    g.add(box(1.15, 0.06, 1.3, m.dark, 0, 2.4, 0.14));
+    g.add(box(0.46, 0.55, 0.32, m.vest, 0, 1.45, 0.38));
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.15, 12, 10), m.skin);
+    head.position.set(0, 1.88, 0.38); head.castShadow = true; g.add(head);
+    g.add(box(0.09, 2.5, 0.12, m.steel, -0.34, 1.3, -0.72)); g.add(box(0.09, 2.5, 0.12, m.steel, 0.34, 1.3, -0.72));
+    // Telescopic inner mast: rises at half the carriage height so a high lift still looks connected
+    const inner = new THREE.Group();
+    inner.add(box(0.07, 2.5, 0.1, m.steel, -0.27, 1.3, -0.76)); inner.add(box(0.07, 2.5, 0.1, m.steel, 0.27, 1.3, -0.76));
+    g.add(inner);
+    g.userData.inner = inner;
+    const car = new THREE.Group();
+    car.position.y = 0.08;
+    car.add(box(0.82, 0.5, 0.06, m.dark, 0, 0.3, -0.8));
+    car.add(box(0.12, 0.05, 1.1, m.steel, -0.24, 0.03, -1.36)); car.add(box(0.12, 0.05, 1.1, m.steel, 0.24, 0.03, -1.36));
+    g.add(car);
+    const wg = new THREE.CylinderGeometry(0.28, 0.28, 0.24, 16);
+    for (const [x, z] of [[-0.56, -0.45], [0.56, -0.45], [-0.56, 0.75], [0.56, 0.75]]) { const w = new THREE.Mesh(wg, m.tyre); w.rotation.z = Math.PI / 2; w.position.set(x, 0.28, z); g.add(w); }
+    const b = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.1, 0.14), m.beacon); b.position.set(0, 2.5, 0.62); g.add(b);
+    g.userData.carriage = car;
+    return g;
+  }
+  function loadPallet(fork, mat) {
+    const p = new THREE.Mesh(new THREE.BoxGeometry(1.0, W.GEOM.palletHeight, 1.15), mat);
+    p.position.set(0, 0.06 + W.GEOM.palletHeight / 2, -1.36);
+    p.castShadow = true;
+    fork.userData.carriage.add(p);
+    fork.userData.load = p;
+    return p;
+  }
+
+  /** Articulated truck; the trailer's rear doors are at local z = 0, the cab points to +z. */
+  function makeTruck(accent) {
+    const m = mats();
+    const g = new THREE.Group();
+    g.add(box(2.55, 3.2, 13.6, m.trailer, 0, 2.75, 6.8));
+    g.add(box(2.57, 0.35, 13.0, accent ? lam(accent) : m.stripe, 0, 1.6, 6.9));
+    g.add(box(1.2, 0.4, 17.0, m.dark, 0, 0.85, 8.6));
+    const wg = new THREE.CylinderGeometry(0.5, 0.5, 0.35, 16);
+    for (const z of [1.6, 2.8, 14.2, 16.4]) for (const x of [-1.05, 1.05]) { const w = new THREE.Mesh(wg, m.tyre); w.rotation.z = Math.PI / 2; w.position.set(x, 0.5, z); g.add(w); }
+    g.add(box(2.5, 2.9, 2.5, m.cab, 0, 2.1, 15.6));
+    g.add(box(2.3, 1.0, 0.06, m.glass, 0, 2.9, 16.86, false));
+    return g;
+  }
+
+  /** Roof trusses, light lines and columns: only visible when the camera is inside (below the roof). */
+  function makeRoof() {
+    const m = mats();
+    const g = new THREE.Group();
+    const H = 12.5;
+    for (let z = -50; z <= 50; z += 10) g.add(box(160, 0.7, 0.25, m.steel, 0, H, z, false));
+    for (let x = -80; x <= 80; x += 16) g.add(box(0.25, 0.35, 100, m.steel, x, H + 0.5, 0, false));
+    const roof = new THREE.Mesh(new THREE.PlaneGeometry(160, 100), m.roof);
+    roof.rotation.x = Math.PI / 2; roof.position.y = H + 0.9;
+    g.add(roof);
+    const pos = [];
+    for (let x = -74; x <= 74; x += 7.4) for (let z = -44; z <= 44; z += 11) pos.push([x, z]);
+    const lights = new THREE.InstancedMesh(new THREE.BoxGeometry(0.5, 0.08, 2.4), m.light, pos.length);
+    const m4 = new THREE.Matrix4();
+    pos.forEach(([x, z], i) => lights.setMatrixAt(i, m4.makeTranslation(x, H - 0.6, z)));
+    g.add(lights);
+    for (let x = -80; x <= 80; x += 10) { g.add(box(0.4, H, 0.4, m.steel, x, H / 2, -49.8, false)); g.add(box(0.4, H, 0.4, m.steel, x, H / 2, 49.8, false)); }
+    for (let z = -40; z <= 40; z += 10) { g.add(box(0.4, H, 0.4, m.steel, -79.8, H / 2, z, false)); g.add(box(0.4, H, 0.4, m.steel, 79.8, H / 2, z, false)); }
+    g.visible = false;
+    return g;
+  }
+
+  // ---------- Paths ----------
+  function polyline(points) {
+    const segs = []; let total = 0;
+    for (let i = 1; i < points.length; i++) {
+      const [x0, z0] = points[i - 1], [x1, z1] = points[i];
+      const len = Math.hypot(x1 - x0, z1 - z0);
+      if (len < 0.01) continue;
+      segs.push({ x0, z0, x1, z1, len, start: total });
+      total += len;
+    }
+    return { segs, total };
+  }
+  function along(pl, d) {
+    d = clamp(d, 0, pl.total);
+    const s = pl.segs.find(x => d <= x.start + x.len) || pl.segs[pl.segs.length - 1];
+    const k = (d - s.start) / s.len;
+    return { x: s.x0 + (s.x1 - s.x0) * k, z: s.z0 + (s.z1 - s.z0) * k, dx: (s.x1 - s.x0) / s.len, dz: (s.z1 - s.z0) / s.len };
+  }
+  const headingOf = (dx, dz) => Math.atan2(-dx, -dz);
+  function turn(cur, target, max) {
+    let d = ((target - cur + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI;
+    return cur + clamp(d, -max, max);
+  }
+
+  // ---------- Sound ----------
+  class Ambience {
+    constructor() { this.on = false; this.ctx = null; }
+    async toggle() {
+      if (!this.ctx) {
+        const AC = window.AudioContext || window.webkitAudioContext;
+        if (!AC) return false;
+        try { this.ctx = new AC(); this.build(); } catch { this.ctx = null; return false; }
+      }
+      this.on = !this.on;
+      try {
+        if (this.on) { await this.ctx.resume(); this.master.gain.setTargetAtTime(1, this.ctx.currentTime, 0.4); }
+        else { this.master.gain.setTargetAtTime(0, this.ctx.currentTime, 0.15); if (window.speechSynthesis) speechSynthesis.cancel(); }
+      } catch { /* audio blocked: stay silent */ }
+      return this.on;
+    }
+    build() {
+      const c = this.ctx;
+      this.master = c.createGain(); this.master.gain.value = 0; this.master.connect(c.destination);
+      // HVAC rumble: looped brown noise through a low-pass filter
+      const len = c.sampleRate * 4, buf = c.createBuffer(1, len, c.sampleRate), d = buf.getChannelData(0);
+      let last = 0;
+      for (let i = 0; i < len; i++) { last = (last + 0.02 * (Math.random() * 2 - 1)) / 1.02; d[i] = last * 3.5; }
+      const src = c.createBufferSource(); src.buffer = buf; src.loop = true;
+      const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 420;
+      const g = c.createGain(); g.gain.value = 0.25;
+      src.connect(lp); lp.connect(g); g.connect(this.master); src.start();
+      const o = c.createOscillator(); o.frequency.value = 100;
+      const og = c.createGain(); og.gain.value = 0.01;
+      o.connect(og); og.connect(this.master); o.start();
+    }
+    /** Reversing alarm: three short beeps, louder when the forklift is close to the camera. */
+    beep(vol) {
+      if (!this.on || !this.ctx || vol < 0.05) return;
+      const c = this.ctx, t0 = c.currentTime;
+      for (let i = 0; i < 3; i++) {
+        const o = c.createOscillator(); o.type = 'square'; o.frequency.value = 1150;
+        const g = c.createGain(), t = t0 + i * 0.5, v = 0.045 * vol;
+        g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(v, t + 0.01); g.gain.setValueAtTime(v, t + 0.22); g.gain.linearRampToValueAtTime(0, t + 0.24);
+        o.connect(g); g.connect(this.master); o.start(t); o.stop(t + 0.3);
+      }
+    }
+    speak(text) {
+      return new Promise(res => {
+        if (!this.on || !window.speechSynthesis) return res();
+        try {
+          speechSynthesis.cancel();
+          const u = new SpeechSynthesisUtterance(String(text).replace(/–/g, ' to ').replace(/°C/g, ' degrees').replace(/\bm\b/g, 'metres'));
+          const vs = speechSynthesis.getVoices();
+          u.voice = vs.find(v => /en[-_]IN/i.test(v.lang)) || vs.find(v => /en[-_]GB/i.test(v.lang)) || vs.find(v => /^en/i.test(v.lang)) || null;
+          u.rate = 1.03;
+          u.onend = u.onerror = () => res();
+          speechSynthesis.speak(u);
+          setTimeout(res, 25000);
+        } catch { res(); }
+      });
+    }
+  }
+
+  // ---------- The immersive controller ----------
+  class Immersive {
+    /** ui: { onMode(mode), caption(obj|null), location(text) } */
+    constructor(viewer, model, ui) {
+      this.v = viewer; this.model = model; this.ui = ui;
+      this.mode = 'orbit';
+      this.sound = new Ambience();
+      this.roof = makeRoof();
+      viewer.scene.add(this.roof);
+      viewer.scene.fog = new THREE.Fog(new THREE.Color(css('--scene-bg')), 600, 1200);
+      this.life = new THREE.Group();
+      viewer.scene.add(this.life);
+      this.buildLife();
+      viewer.hooks.push((dt, t) => this.update(dt, t));
+      viewer.beforeFocus = () => {
+        if (this.internal) return;
+        if (this.mode === 'walk') this.exitWalk(true);
+        else if (this.mode === 'journey') this.finishJourney(true);
+        else if (this.mode === 'tour') this.stopTour();
+      };
+      this.bindInput();
+    }
+
+    // ----- A living site -----
+    buildLife() {
+      this.life.clear();
+      this.ambient = [];
+      const m = mats();
+      const accents = [0x2f5b8c, 0xc8362d, 0x2f7d4f, 0x6b4c9a];
+      ['D2', 'D6', 'D9', 'D11'].forEach((id, i) => {
+        const d = W.dockById(id), t = makeTruck(accents[i]);
+        t.position.set(d.x, 0, W.GEOM.dockZ + 0.6);
+        this.life.add(t);
+      });
+      // Aisles from the data, so the traffic follows whatever site is loaded
+      const aisles = zone => [...new Set(this.model.slots.filter(s => s.zone === zone).map(s => s.aisleX))].sort((a, b) => a - b);
+      const aA = aisles('A'), aC = aisles('C');
+      const pick = (arr, f) => arr.length ? arr[Math.floor((arr.length - 1) * f)] : 0;
+      const loops = [
+        { pts: [[-70, 32], [64, 32]], speed: 2.8, load: true },
+        { pts: [[pick(aA, 0.25), 32.5], [pick(aA, 0.25), -40]], speed: 2.1, load: true },
+        { pts: [[pick(aA, 0.7), 32.5], [pick(aA, 0.7), -28]], speed: 2.0, load: false },
+        { pts: [[52, 33], [52, 2], [pick(aC, 0.5), 2], [pick(aC, 0.5), -36]], speed: 2.2, load: true },
+        { pts: [[-58, 44], [46, 44]], speed: 2.5, load: true },
+      ];
+      const loadMat = new THREE.MeshLambertMaterial({ color: 0xffffff, map: this.v.mats.pallet.map });
+      this.ambientLoadMat = loadMat;
+      loops.forEach((L, i) => {
+        const f = makeForklift();
+        const pl = polyline(L.pts);
+        if (L.load) loadPallet(f, loadMat);
+        const d = (i * 0.37 % 1) * pl.total;
+        const p = along(pl, d);
+        f.position.set(p.x, 0, p.z);
+        f.rotation.y = headingOf(p.dx, p.dz);
+        this.life.add(f);
+        this.ambient.push({ f, pl, d, dir: 1, speed: L.speed, pause: 0, hasLoad: L.load });
+      });
+    }
+
+    rebuild() { this.stopAll(); this.buildLife(); }
+
+    updateAmbient(dt) {
+      if (reduceMotion()) return;
+      for (const a of this.ambient) {
+        if (a.pause > 0) { a.pause -= dt; continue; }
+        a.d += a.dir * a.speed * dt;
+        if (a.d >= a.pl.total || a.d <= 0) {
+          a.d = clamp(a.d, 0, a.pl.total); a.dir *= -1; a.pause = 1.6;
+          if (a.f.userData.load && a.hasLoad) a.f.userData.load.visible = !a.f.userData.load.visible;
+          const dist = this.v.camera.position.distanceTo(a.f.position);
+          this.sound.beep(clamp(1 - dist / 70, 0, 1));
+        }
+        const p = along(a.pl, a.d);
+        a.f.position.set(p.x, 0, p.z);
+        a.f.rotation.y = turn(a.f.rotation.y, headingOf(p.dx * a.dir, p.dz * a.dir), 3 * dt);
+      }
+    }
+
+    // ----- Shared -----
+    takeCamera() { this.v.manualCamera = true; this.v.controls.enabled = false; this.v.flight = null; }
+    releaseCamera(target) {
+      this.v.manualCamera = false; this.v.controls.enabled = true;
+      if (target) this.v.controls.target.copy(target);
+    }
+    stopAll() {
+      if (this.mode === 'walk') this.exitWalk(true);
+      if (this.mode === 'journey') this.finishJourney(true);
+      if (this.mode === 'tour') this.stopTour();
+    }
+    setMode(m) { this.mode = m; this.ui.onMode(m); }
+
+    update(dt, t) {
+      this.updateAmbient(dt);
+      const inside = this.v.camera.position.y < 13.2;
+      this.roof.visible = inside;
+      const fog = this.v.scene.fog;
+      fog.near = inside ? 28 : 600; fog.far = inside ? 170 : 1200;
+      if (inside) {
+        // Walking into the chilled chamber feels cold: a blue haze
+        const cold = this.mode === 'walk' && /^Zone C/.test(this.walk.lastLoc || '');
+        fog.color.set(cold ? '#cfe2f4' : css('--scene-bg'));
+        if (cold) { fog.near = 8; fog.far = 75; }
+      }
+      if (this.mode === 'walk') this.walkStep(dt, t);
+      else if (this.mode === 'journey') this.journeyStep(dt);
+      else if (this.mode === 'tour') this.tourStep(dt);
+    }
+
+    // ----- Walk inside -----
+    defaultWalkStart() {
+      const p = this.model.plans[0];
+      if (p) { const s = this.model.byId.get(p._slots[0]); return s.zone === 'C' ? { x: s.aisleX, z: 0.5, yaw: 0 } : { x: s.aisleX, z: 31.5, yaw: 0 }; }
+      return { x: -14, z: 40, yaw: 0 };
+    }
+
+    enterWalk(at) {
+      this.stopAll();
+      this.takeCamera();
+      const p = at || this.defaultWalkStart();
+      this.walk = { x: p.x, z: p.z, yaw: p.yaw, pitch: -0.04, keys: new Set(), pad: { f: 0, r: 0, turn: 0 }, moving: 0, lastLoc: '' };
+      this.v.camera.rotation.order = 'YXZ';
+      this.setMode('walk');
+      this.walkStep(0, 0);
+    }
+
+    exitWalk(silent) {
+      if (this.mode !== 'walk') return;
+      this.setMode('orbit');
+      this.v.camera.rotation.order = 'XYZ';
+      const c = this.v.camera.position;
+      this.releaseCamera(new THREE.Vector3(c.x - Math.sin(this.walk.yaw) * 10, 0, c.z - Math.cos(this.walk.yaw) * 10));
+      this.ui.location('');
+      if (!silent) { this.internal = true; this.v.focus('overview'); this.internal = false; }
+    }
+
+    teleport(target) {
+      const t = String(target).toUpperCase();
+      const aisleMid = zone => { const xs = [...new Set(this.model.slots.filter(s => s.zone === zone).map(s => s.aisleX))].sort((a, b) => a - b); return xs[Math.floor(xs.length / 2)] ?? 0; };
+      const spots = {
+        OVERVIEW: { x: -14, z: 40, yaw: 0 }, DOCKS: { x: 0, z: 42, yaw: Math.PI },
+        A: { x: aisleMid('A'), z: 31.5, yaw: 0 }, C: { x: aisleMid('C'), z: 0.5, yaw: 0 },
+        H: { x: aisleMid('H'), z: 31.5, yaw: 0 }, S: { x: aisleMid('S'), z: 31.5, yaw: 0 },
+      };
+      const s = spots[t];
+      if (!s || this.mode !== 'walk') return false;
+      Object.assign(this.walk, { x: s.x, z: s.z, yaw: s.yaw, pitch: -0.04 });
+      return true;
+    }
+
+    blocked(x, z) {
+      const R = 0.38;
+      if (x < -79.3 || x > 79.3 || z < -49.3 || z > 49.3) return true;
+      for (const b of this.v.rackBoxes) if (x > b.x0 - R && x < b.x1 + R && z > b.z0 - R && z < b.z1 + R) return true;
+      return false;
+    }
+
+    walkStep(dt, t) {
+      const w = this.walk, k = w.keys;
+      const f = (k.has('KeyW') || k.has('ArrowUp') ? 1 : 0) - (k.has('KeyS') || k.has('ArrowDown') ? 1 : 0) + w.pad.f;
+      const r = (k.has('KeyD') ? 1 : 0) - (k.has('KeyA') ? 1 : 0) + w.pad.r;
+      const rot = (k.has('ArrowLeft') || k.has('KeyQ') ? 1 : 0) - (k.has('ArrowRight') || k.has('KeyE') ? 1 : 0) + w.pad.turn;
+      w.yaw += rot * 1.8 * dt;
+      const speed = (k.has('ShiftLeft') || k.has('ShiftRight') ? 7 : 3.2) * dt;
+      const fx = -Math.sin(w.yaw), fz = -Math.cos(w.yaw), rx = Math.cos(w.yaw), rz = -Math.sin(w.yaw);
+      let dx = (fx * f + rx * r) * speed, dz = (fz * f + rz * r) * speed;
+      const len = Math.hypot(f, r);
+      if (len > 1) { dx /= len; dz /= len; }
+      if (dx && !this.blocked(w.x + dx, w.z)) w.x += dx;
+      if (dz && !this.blocked(w.x, w.z + dz)) w.z += dz;
+      w.moving = clamp(w.moving + (len ? dt * 4 : -dt * 4), 0, 1);
+      const bob = reduceMotion() ? 0 : Math.sin(t * 9) * 0.03 * w.moving;
+      this.v.camera.position.set(w.x, 1.7 + bob, w.z);
+      this.v.camera.rotation.set(w.pitch, w.yaw, 0, 'YXZ');
+      const loc = this.locationText(w.x, w.z);
+      if (loc !== w.lastLoc) { w.lastLoc = loc; this.ui.location(loc); }
+    }
+
+    locationText(x, z) {
+      const zone = W.ZONES.find(q => x >= q.bounds.x0 && x <= q.bounds.x1 && z >= q.bounds.z0 && z <= q.bounds.z1 + 1);
+      if (zone) {
+        const rows = new Map();
+        for (const s of this.model.slots) if (s.zone === zone.id && !rows.has(s.row)) rows.set(s.row, s.x);
+        let best = null, bd = Infinity;
+        for (const [row, rx] of rows) { const d = Math.abs(rx - x); if (d < bd) { bd = d; best = row; } }
+        return `Zone ${zone.id} · ${zone.name} · ${zone.temp.min}–${zone.temp.max} °C · beside row ${zone.id}-${String(best).padStart(2, '0')}`;
+      }
+      if (z > W.GEOM.crossAisleZ + 2) {
+        let nd = W.DOCKS[0], dd = Infinity;
+        for (const d of W.DOCKS) { const q = Math.abs(d.x - x); if (q < dd) { dd = q; nd = d; } }
+        return `Dock area · nearest dock ${nd.id} (${nd.type})`;
+      }
+      if (Math.abs(x - W.GEOM.chilledCorridorX) < 3) return 'Corridor to the chilled chamber';
+      return 'Main cross aisle';
+    }
+
+    bindInput() {
+      const typing = () => /^(INPUT|TEXTAREA|SELECT)$/.test((document.activeElement || {}).tagName || '');
+      window.addEventListener('keydown', e => {
+        if (this.mode === 'walk' && !typing()) {
+          if (e.code === 'Escape') { this.exitWalk(); return; }
+          if (/^(Key[WASDQE]|Arrow|Shift)/.test(e.code)) { this.walk.keys.add(e.code); e.preventDefault(); }
+        } else if (e.code === 'Escape' && (this.mode === 'journey' || this.mode === 'tour')) this.skip();
+      });
+      window.addEventListener('keyup', e => { if (this.walk) this.walk.keys.delete(e.code); });
+      window.addEventListener('blur', () => { if (this.walk) this.walk.keys.clear(); });
+      const el = this.v.renderer.domElement;
+      let drag = null;
+      el.addEventListener('pointerdown', e => { if (this.mode === 'walk') { drag = { x: e.clientX, y: e.clientY }; } });
+      window.addEventListener('pointermove', e => {
+        if (!drag || this.mode !== 'walk') return;
+        this.walk.yaw -= (e.clientX - drag.x) * 0.0045;
+        this.walk.pitch = clamp(this.walk.pitch - (e.clientY - drag.y) * 0.0045, -1.1, 0.9);
+        drag = { x: e.clientX, y: e.clientY };
+      });
+      window.addEventListener('pointerup', () => { drag = null; });
+    }
+
+    setPad(f, r, t) { if (this.walk) Object.assign(this.walk.pad, { f, r, turn: t }); }
+
+    // ----- Follow my pallet -----
+    followPallet(planId) {
+      const j = this.model.journey(planId);
+      this.stopAll();
+      this.takeCamera();
+      const v = this.v;
+      const pm = v.planMeshes.get(j.plan_id);
+      const colorVar = pm ? pm.colorVar : '--plan-1';
+      if (!this.hero) {
+        this.hero = makeForklift();
+        this.heroLoadMat = new THREE.MeshLambertMaterial({ color: 0xffffff, emissiveIntensity: 0.35, map: v.planTex });
+        loadPallet(this.hero, this.heroLoadMat);
+        this.truck = makeTruck(0xe8a800);
+        v.scene.add(this.hero, this.truck);
+      }
+      this.heroLoadMat.color.set(css(colorVar)); this.heroLoadMat.emissive.set(css(colorVar));
+      const dock = W.dockById(j.dock);
+      this.truck.position.set(dock.x, 0, 95); this.truck.visible = true;
+      this.hero.visible = true; this.hero.userData.load.visible = true;
+      this.hero.userData.carriage.position.y = 0.08; this.hero.userData.inner.position.y = 0;
+      this.hero.position.set(dock.x, 0, 53); this.hero.rotation.y = 0;
+      // Hide this slot's reserved box until the forklift puts the pallet there
+      this.hidden = null;
+      if (pm) {
+        const i = j.slot_index || 0, m4 = new THREE.Matrix4(); pm.mesh.getMatrixAt(i, m4);
+        this.hidden = { mesh: pm.mesh, m4: m4.clone(), i };
+        pm.mesh.setMatrixAt(i, new THREE.Matrix4().makeScale(0, 0, 0)); pm.mesh.instanceMatrix.needsUpdate = true;
+      }
+      const slot = j.slot;
+      const side = Math.sign(slot.x - slot.aisleX) || 1;
+      const pts = j.points.slice();
+      pts[0] = [dock.x, 48];
+      const pl = polyline(pts);
+      const travelT = clamp(pl.total / 9, 4, 16);
+      const liftY = 0.18 + (slot.level - 1) * W.GEOM.levelHeight - 0.06;
+      const cap = (text) => ({ title: `Pallet journey · ${j.plan_id} · ${j.goods}`, text });
+      this.J = {
+        j, pl, side, liftY, slot, t: 0, start: performance.now(), phase: -1, dock,
+        phases: [
+          { d: 4.2, cap: cap(`A truck backs onto dock ${j.dock}, a ${j.dock_type.toLowerCase()}.`) },
+          { d: 2.4, cap: cap(`The pallet is scanned and assigned to location ${j.location} in zone ${j.zone} (${j.zone_name}, ${j.temperature}).`) },
+          { d: travelT, cap: cap(`The forklift drives ${j.distance_m} m to the aisle: about ${j.one_way_minutes} min at real speed (shown faster).`) },
+          { d: 1.0, cap: cap(`Turning into the rack at row ${slot.zone}-${String(slot.row).padStart(2, '0')}.`) },
+          { d: 2.4, cap: cap(`Lifting to level ${j.level}: ${j.lift_height_m} m above the floor.`) },
+          { d: 1.4, cap: cap(`Stored at ${j.location}.`) },
+          { d: 3.6, cap: cap(`One round trip takes about ${j.cycle_seconds} s. All ${fmt(j.pallets_in_plan)} pallets of ${j.plan_id}: about ${j.putaway_forklift_hours} forklift-hours.`) },
+        ],
+      };
+      this.setMode('journey');
+      return j;
+    }
+
+    journeyStep(dt) {
+      const J = this.J; if (!J) return;
+      J.t = (performance.now() - J.start) / 1000; // wall-clock: same length on slow and fast machines
+      let acc = 0, idx = 0;
+      for (; idx < J.phases.length; idx++) { if (J.t < acc + J.phases[idx].d) break; acc += J.phases[idx].d; }
+      if (idx >= J.phases.length) { this.finishJourney(false); return; }
+      const ph = J.phases[idx], k = clamp((J.t - acc) / ph.d, 0, 1), e = smooth(k);
+      if (idx !== J.phase) {
+        J.phase = idx;
+        this.ui.caption(Object.assign({ step: idx + 1, steps: J.phases.length, onSkip: () => this.skip() }, ph.cap));
+        this.sound.speak(ph.cap.text);
+        if (idx === 5) this.placePallet();
+        if (idx === 6) this.sound.beep(0.8);
+      }
+      const h = this.hero, cam = this.v.camera, d = J.dock, s = J.slot;
+      const lerpCam = (px, py, pz, lx, ly, lz, rate = 3) => {
+        const a = 1 - Math.exp(-dt * rate);
+        cam.position.lerp(new THREE.Vector3(px, py, pz), a);
+        J.look = (J.look || new THREE.Vector3(lx, ly, lz)).lerp(new THREE.Vector3(lx, ly, lz), a);
+        cam.lookAt(J.look);
+      };
+      if (idx === 0) {
+        this.truck.position.z = 95 - (95 - (W.GEOM.dockZ + 0.6)) * e;
+        if (!J.look) { cam.position.set(d.x + 18, 8, 70); }
+        lerpCam(d.x + 16, 7, 66, d.x, 2, 56, 2);
+      } else if (idx === 1) {
+        h.position.set(d.x, 0, 53 - 5 * e);
+        lerpCam(d.x + 6, 4.5, 41, d.x, 1.2, 49, 2.5);
+      } else if (idx === 2) {
+        const p = along(J.pl, J.pl.total * e);
+        h.position.set(p.x, 0, p.z);
+        h.rotation.y = turn(h.rotation.y, headingOf(p.dx, p.dz), 6 * dt);
+        const fx = -Math.sin(h.rotation.y), fz = -Math.cos(h.rotation.y);
+        lerpCam(p.x - fx * 7.5, 3.6, p.z - fz * 7.5, p.x + fx * 4, 1.2, p.z + fz * 4, 4);
+      } else if (idx === 3) {
+        h.rotation.y = turn(h.rotation.y, headingOf(J.side, 0), 4 * dt);
+        lerpCam(s.aisleX - J.side * 0.5, J.liftY + 2.4, s.z + 7, s.x, J.liftY + 1, s.z, 2.5);
+      } else if (idx === 4) {
+        h.userData.carriage.position.y = 0.08 + (J.liftY - 0.08) * e;
+        h.userData.inner.position.y = h.userData.carriage.position.y * 0.5;
+        lerpCam(s.aisleX - J.side * 0.5, J.liftY + 2.4, s.z + 7, s.x, J.liftY + 1, s.z, 2.5);
+      } else if (idx === 5) {
+        // pallet centre sits 1.36 m ahead of the forklift centre: drive until it is over the slot
+        h.position.x = s.aisleX + J.side * Math.max(0, Math.abs(s.x - s.aisleX) - 1.36) * e;
+        lerpCam(s.aisleX - J.side * 0.5, J.liftY + 2.4, s.z + 7, s.x, J.liftY + 1, s.z, 2.5);
+      } else {
+        h.position.x = s.aisleX + J.side * Math.max(0, Math.abs(s.x - s.aisleX) - 1.36) * (1 - e);
+        h.userData.carriage.position.y = 0.08 + (J.liftY - 0.08) * (1 - e);
+        h.userData.inner.position.y = h.userData.carriage.position.y * 0.5;
+        const a = 0.4 * e;
+        lerpCam(s.x + Math.sin(a) * 9 - J.side * 4, J.liftY + 3, s.z + Math.cos(a) * 9, s.x, J.liftY + 0.6, s.z, 2);
+      }
+    }
+
+    placePallet() {
+      if (this.hero) this.hero.userData.load.visible = false;
+      if (this.hidden) { this.hidden.mesh.setMatrixAt(this.hidden.i, this.hidden.m4); this.hidden.mesh.instanceMatrix.needsUpdate = true; this.hidden = null; }
+    }
+
+    finishJourney(silent) {
+      const J = this.J;
+      this.placePallet();
+      if (this.hero) { this.hero.visible = false; }
+      if (this.truck) this.truck.visible = false;
+      this.J = null;
+      this.ui.caption(null);
+      if (window.speechSynthesis && this.sound.on) speechSynthesis.cancel();
+      this.setMode('orbit');
+      const tgt = J ? new THREE.Vector3(J.slot.x, 2, J.slot.z) : null;
+      this.releaseCamera(tgt);
+      if (!silent && J) { this.internal = true; this.v.focus(J.j.plan_id); this.internal = false; }
+    }
+
+    // ----- Guided tour -----
+    defaultTour() {
+      const sum = this.model.siteSummary();
+      const z = id => sum.zones.find(q => q.zone === id);
+      const A = z('A'), C = z('C'), H = z('H'), S = z('S');
+      return [
+        { target: 'overview', caption: `Welcome to ${sum.site}: ${fmt(sum.pallet_positions)} pallet positions in four zones, ${fmt(sum.free_now)} free today.` },
+        { target: 'docks', caption: `${sum.docks} docks on the south side. D8, D9 and D10 are sealed reefer docks for chilled goods.` },
+        { target: 'A', caption: `Zone A, ambient ${A.temperature}: ${fmt(A.total_positions)} positions on ${A.rack_levels} levels, ${fmt(A.free_now)} free.` },
+        { target: 'C', caption: `Zone C, chilled ${C.temperature}, temperature-mapped with 24/7 logging: ${fmt(C.free_now)} of ${fmt(C.total_positions)} positions free.` },
+        { target: 'H', caption: `Zone H stores dangerous goods of classes 3, 8 and 9 behind fire-rated walls: ${fmt(H.free_now)} positions free.` },
+        { target: 'S', caption: `Zone S is a caged, CCTV-monitored area for high-value goods: ${fmt(S.free_now)} positions free.` },
+        { target: 'overview', caption: 'That is the site. Tell the agent what you want to store and it will plan it live.' },
+      ];
+    }
+
+    startTour(stops, title = 'Guided tour') {
+      this.stopAll();
+      this.tour = { stops, title, i: -1, until: 0, spoken: true, now: 0 };
+      this.setMode('tour');
+      this.nextStop();
+    }
+
+    nextStop() {
+      const T = this.tour;
+      T.i++;
+      if (T.i >= T.stops.length) { this.stopTour(); return; }
+      const s = T.stops[T.i];
+      this.internal = true;
+      try { this.v.focus(s.target); } catch { /* unknown target: stay */ }
+      this.internal = false;
+      if (this.v.flight) this.v.flight.dur = reduceMotion() ? 1 : 2400;
+      const words = s.caption.split(/\s+/).length;
+      T.start = performance.now(); T.now = 0; T.until = clamp(words / 2.6 + 2.4, 4.5, 13);
+      T.spoken = false;
+      this.ui.caption({ title: T.title, text: s.caption, step: T.i + 1, steps: T.stops.length, onSkip: () => this.skip(), skipLabel: 'Next' });
+      this.sound.speak(s.caption).then(() => { if (this.tour === T) T.spoken = true; });
+      if (!this.sound.on) T.spoken = true;
+    }
+
+    tourStep(dt) {
+      const T = this.tour; if (!T) return;
+      T.now = (performance.now() - T.start) / 1000;
+      if (!this.v.flight && !reduceMotion()) {
+        // slow drift around the stop
+        const c = this.v.camera.position, tg = this.v.controls.target, a = 0.05 * dt;
+        const x = c.x - tg.x, z = c.z - tg.z;
+        c.x = tg.x + x * Math.cos(a) - z * Math.sin(a);
+        c.z = tg.z + x * Math.sin(a) + z * Math.cos(a);
+      }
+      if (T.now >= T.until && T.spoken) this.nextStop();
+    }
+
+    stopTour() {
+      this.tour = null;
+      this.ui.caption(null);
+      if (window.speechSynthesis && this.sound.on) speechSynthesis.cancel();
+      this.setMode('orbit');
+    }
+
+    skip() {
+      if (this.mode === 'journey') this.finishJourney(false);
+      else if (this.mode === 'tour') { if (window.speechSynthesis) speechSynthesis.cancel(); this.nextStop(); }
+    }
+  }
+
+  root.WarehouseImmersive = Immersive;
+})(typeof self !== 'undefined' ? self : this);
+
+</script>
+<script>
+/*
+ * The agent: tools + instructions + an agent loop that works with three "brains".
+ *
+ *  1. ClaudeInArtifact — when the page runs inside claude.ai, Claude is reached
+ *     through the page's `sample` capability (tools run here, in the page).
+ *  2. AnthropicApi     — when the page is served by server.js with your own
+ *     API key, this file runs the classic tool-use loop against the
+ *     Messages API (plan → call tools → read results → repeat → answer).
+ *  3. GuidedDemo       — no AI available: scripted scenarios call the SAME
+ *     tools so the demo never breaks; clearly labelled as scripted.
+ *
+ * Tools are deterministic (WarehouseCore). The model decides WHICH tools to
+ * call and how to explain the result; it never computes capacity itself.
+ */
+(function (root) {
+  'use strict';
+  const W = root.WarehouseCore;
+
+  const PLAN_COLORS = ['--plan-1', '--plan-2', '--plan-3', '--plan-4'];
+
+  // ---------- Instructions ----------
+  function instructions(model) {
+    const summary = model.siteSummary();
+    const plans = model.plans.map(p => model.publicPlan(p));
+    return [
+      'You are the Warehouse Preview Agent. A prospective logistics client is looking at a live 3D model of a warehouse next to this chat, and you change what they see by calling tools.',
+      'The site is FICTIONAL sample data ("Demo DC-01, Bhiwandi") built for a concept prototype. If asked whether it is real, say it is sample data and that real site data can be loaded as a CSV.',
+      '',
+      'How to work:',
+      '- Every capacity, location, distance, time or rule you mention must come from a tool result or the SITE DATA below. Never estimate or invent numbers.',
+      '- When the client describes goods, call find_space once per distinct type of goods (in the same turn when there are several), then draw_route for each new plan, then answer. find_space already highlights the slots in the 3D view and moves the camera.',
+      '- If find_space returns eligible:false, explain the reason and the suggestion plainly. Do not put the goods in a zone the rules forbid.',
+      '- If the client changes a requirement, call release_plan on the old plan first, then plan again.',
+      '- Missing details: assume ambient, 500 kg and 1.4 m per pallet, not dangerous, not high value. State the assumption in one short sentence.',
+      '- Use plan IDs (P1, P2…) so the client can match them to the colours on screen. State any shortfall clearly.',
+      '- Answer in at most 110 words of plain sentences. No headings, tables or bullet lists.',
+      '- After a plan, offer a client summary. Call create_client_report only when the client asks for a report or summary.',
+      '- To let the client experience the site: call follow_pallet when they want to see how their goods arrive, travel or get stored (it needs an existing plan); call give_tour when they ask for a tour, a walkthrough or an overview of the site. Tour captions are shown and read aloud: at most 25 words each, only facts from SITE DATA or tool results.',
+      '- After a plan you may also offer to show a pallet\'s journey.',
+      '- For questions unrelated to warehousing for this client, decline briefly and steer back.',
+      '',
+      'SITE DATA (live):',
+      JSON.stringify(summary),
+      '',
+      'PLANS ALREADY MADE IN THIS SESSION:',
+      plans.length ? JSON.stringify(plans) : 'none',
+    ].join('\n');
+  }
+
+  // ---------- Tools ----------
+  function buildTools(ctx) {
+    // ctx: { model, viewer, ui }  — ui.planColor(id), ui.renderReport(data), ui.refresh()
+    const { model, viewer, ui } = ctx;
+    const tools = [
+      {
+        name: 'find_space',
+        label: 'Find space',
+        description: 'Applies the site rules to the goods, picks the right zone, and reserves the nearest free pallet positions to the dock. Highlights them in 3D and moves the camera. Returns eligible:false with a reason when the site cannot take the goods; otherwise the plan (plan_id, zone, pallets reserved, shortfall, rows, dock, travel distances, put-away forklift hours).',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            goods: { type: 'string', description: 'Short label, e.g. "Vaccines" or "Lithium batteries"' },
+            pallets: { type: 'integer', minimum: 1, description: 'Number of pallets' },
+            temperature: { type: 'string', enum: ['ambient', 'chilled', 'frozen'], description: 'chilled = 2–8 °C; frozen = −18 °C' },
+            hazmat_class: { type: 'string', description: 'Dangerous-goods class such as "3", "8", "9", "2.1". Leave out if the goods are not dangerous.' },
+            high_value: { type: 'boolean', description: 'True for high-value goods needing a secure cage (electronics, phones, luxury)' },
+            weight_kg_per_pallet: { type: 'number', description: 'Default 500' },
+            pallet_height_m: { type: 'number', description: 'Including the pallet base. Default 1.4' },
+          },
+          required: ['goods', 'pallets'],
+        },
+        run(input) {
+          const r = model.findSpace(input);
+          if (r.eligible && r.pallets_reserved > 0) {
+            viewer.showPlan(r.plan_id, model.planSlots(r.plan_id), ui.planColor(r.plan_id));
+            viewer.focus(r.plan_id);
+          }
+          ui.refresh();
+          return r;
+        },
+        summarize(input, r) {
+          if (!r.eligible) return `Not possible: ${r.reason}`;
+          return `${r.plan_id}: reserved ${r.pallets_reserved}/${r.pallets_requested} in zone ${r.zone} (${r.zone_name}) · ${r.rows} · dock ${r.main_dock}` + (r.shortfall ? ` · short by ${r.shortfall}` : '');
+        },
+        pending: input => `Checking rules and free space for ${input.pallets ?? '?'} pallets of ${input.goods || 'goods'}`,
+      },
+      {
+        name: 'draw_route',
+        label: 'Draw route',
+        description: 'Draws the forklift route from a dock to the middle of a plan in the 3D view and returns distance_m and one_way_minutes. Uses the plan\'s main dock unless a dock (D1–D12) that serves the zone is given.',
+        inputSchema: {
+          type: 'object',
+          properties: { plan_id: { type: 'string' }, dock: { type: 'string', description: 'Optional, e.g. "D9"' } },
+          required: ['plan_id'],
+        },
+        run(input) {
+          const r = model.planRoute(String(input.plan_id), input.dock ? String(input.dock) : undefined);
+          viewer.drawRoute(r.plan_id, r.points, ui.planColor(r.plan_id));
+          const { points, ...rest } = r;
+          return rest;
+        },
+        summarize: (i, r) => `${r.plan_id}: ${r.dock} → ${r.to_location}, ${r.distance_m} m (${r.one_way_minutes} min one way)`,
+        pending: i => `Drawing the route for ${i.plan_id}`,
+      },
+      {
+        name: 'move_camera',
+        label: 'Move camera',
+        description: 'Flies the 3D camera to "overview", "docks", a zone ("A", "C", "H", "S"), a dock ("D1"–"D12") or a plan id ("P1").',
+        inputSchema: { type: 'object', properties: { target: { type: 'string' } }, required: ['target'] },
+        run(input) { return { now_showing: viewer.focus(String(input.target)) }; },
+        summarize: (i, r) => `Showing ${r.now_showing}`,
+        pending: i => `Moving the camera to ${i.target}`,
+      },
+      {
+        name: 'get_site_status',
+        label: 'Check site status',
+        description: 'Returns live free, occupied, blocked and reserved positions per zone, plus the plans made so far. Use after plans change.',
+        inputSchema: { type: 'object', properties: {} },
+        run() { return { zones: model.zoneStatus(), plans: model.plans.map(p => model.publicPlan(p)) }; },
+        summarize: (i, r) => r.zones.map(z => `${z.zone} ${z.free_now} free`).join(' · '),
+        pending: () => 'Reading live zone status',
+      },
+      {
+        name: 'release_plan',
+        label: 'Release plan',
+        description: 'Cancels a plan, frees its reserved positions and removes it from the 3D view. Use before re-planning changed requirements.',
+        inputSchema: { type: 'object', properties: { plan_id: { type: 'string' } }, required: ['plan_id'] },
+        run(input) {
+          const r = model.releasePlan(String(input.plan_id));
+          viewer.removePlan(r.released);
+          ui.refresh();
+          return r;
+        },
+        summarize: (i, r) => `Released ${r.released} (${r.pallets_freed} positions freed)`,
+        pending: i => `Releasing ${i.plan_id}`,
+      },
+      {
+        name: 'follow_pallet',
+        label: 'Follow a pallet',
+        description: 'Plays an animated journey of one pallet of an existing plan in the 3D view: the truck docks, a forklift carries the pallet along the route and lifts it into its slot, with captions. Returns the facts of that trip (dock, location, level, lift height, distance, one-way minutes, cycle seconds).',
+        inputSchema: { type: 'object', properties: { plan_id: { type: 'string' } }, required: ['plan_id'] },
+        run(input) {
+          const id = String(input.plan_id);
+          const j = viewer.fx ? viewer.fx.followPallet(id) : model.journey(id);
+          const { points, slot, ...rest } = j;
+          return Object.assign(rest, { playing_in_3d: !!viewer.fx });
+        },
+        summarize: (i, r) => `${r.plan_id}: ${r.dock} → ${r.location}, level ${r.level} (${r.lift_height_m} m), ${r.distance_m} m`,
+        pending: i => `Starting the pallet journey for ${i.plan_id}`,
+      },
+      {
+        name: 'give_tour',
+        label: 'Guided tour',
+        description: 'Plays a narrated camera tour in the 3D view. Give 3–6 stops in order; each has a target ("overview", "docks", a zone "A", "C", "H" or "S", a dock "D1"–"D12", or a plan id) and a caption of at most 25 words using only facts from SITE DATA or tool results. Returns the stops accepted.',
+        inputSchema: {
+          type: 'object',
+          properties: { stops: { type: 'array', minItems: 1, maxItems: 6, items: { type: 'object', properties: { target: { type: 'string' }, caption: { type: 'string' } }, required: ['target', 'caption'] } } },
+          required: ['stops'],
+        },
+        run(input) {
+          const stops = (Array.isArray(input.stops) ? input.stops : []).slice(0, 6).map(x => ({ target: String((x && x.target) || ''), caption: String((x && x.caption) || '').slice(0, 240) }));
+          if (!stops.length) throw new Error('Give at least one stop.');
+          const bad = stops.filter(x => !viewer.canFocus(x.target));
+          if (bad.length) throw new Error(`Unknown target(s): ${bad.map(b => b.target).join(', ')}. Use overview, docks, A, C, H, S, D1–D12 or a plan id.`);
+          if (viewer.fx) viewer.fx.startTour(stops, 'Guided tour');
+          return { started: true, stops: stops.length, targets: stops.map(x => x.target) };
+        },
+        summarize: (i, r) => `${r.stops} stops: ${r.targets.join(' → ')}`,
+        pending: () => 'Preparing a guided tour',
+      },
+      {
+        name: 'create_client_report',
+        label: 'Write client report',
+        description: 'Builds a one-page client summary from all current plans (zones, locations, docks, travel, put-away effort, shortfalls, assumptions) and shows it in the panel. Returns the totals.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            client_name: { type: 'string' },
+            open_questions: { type: 'array', items: { type: 'string' }, description: 'Up to 4 short questions the client should confirm' },
+          },
+        },
+        run(input) {
+          const rep = model.reportData(input.client_name);
+          rep.open_questions = Array.isArray(input.open_questions) ? input.open_questions.slice(0, 4).map(String) : [];
+          if (!rep.plans.length) throw new Error('There are no plans yet. Plan space first with find_space.');
+          ui.renderReport(rep);
+          const { plans, ...totals } = rep;
+          return Object.assign(totals, { plans: plans.length });
+        },
+        summarize: (i, r) => `Report for ${r.client}: ${r.total_pallets_reserved} pallets across ${r.plans} plan(s)`,
+        pending: () => 'Writing the client report',
+      },
+    ];
+    return tools;
+  }
+
+  // ---------- Grounding check: is every number in the answer traceable? ----------
+  const NUM_RE = /(?<![A-Za-z0-9\-–])\d[\d,]*(?:\.\d+)?(?![\d])/g;
+  function numbersIn(text) {
+    return (String(text).match(NUM_RE) || []).map(s => s.replace(/,/g, '')).map(Number).filter(Number.isFinite);
+  }
+  function groundingCheck(answer, sources) {
+    const pool = new Set();
+    for (const src of sources) for (const n of numbersIn(typeof src === 'string' ? src : JSON.stringify(src))) pool.add(n);
+    const found = numbersIn(answer);
+    const checked = found.filter(n => !(Number.isInteger(n) && n <= 10)); // small counts ("2 plans") are exempt
+    const ungrounded = checked.filter(n => {
+      if (pool.has(n)) return false;
+      for (const p of pool) if (Math.round(p) === n || Math.abs(p - n) < 0.051) return false; // rounding of a real value
+      return true;
+    });
+    return { checked: checked.length, ungrounded: [...new Set(ungrounded)] };
+  }
+
+  // ---------- Brains ----------
+  async function runTool(tool, input, hooks, signal) {
+    const step = hooks.onStepStart({ tool, input });
+    try {
+      if (signal && signal.aborted) throw new Error('Stopped');
+      const result = tool.run(input || {});
+      hooks.onStepEnd(step, { ok: true, result, summary: tool.summarize(input || {}, result) });
+      return { ok: true, result };
+    } catch (e) {
+      hooks.onStepEnd(step, { ok: false, error: e.message, summary: e.message });
+      return { ok: false, error: e.message };
+    }
+  }
+
+  /** Brain 1: Claude inside claude.ai via the artifact `sample` capability. */
+  function ClaudeInArtifact(sample, tier) {
+    return {
+      id: 'claude-artifact', label: 'Claude (in claude.ai)',
+      async turn({ ctx, history, userText, hooks, signal, log }) {
+        const tools = buildTools(ctx).map(t => ({
+          name: t.name, description: t.description, inputSchema: t.inputSchema,
+          execute: async input => {
+            const r = await runTool(t, input, hooks, signal);
+            log.push({ name: t.name, input, ...r });
+            if (!r.ok) throw new Error(r.error);
+            return r.result;
+          },
+        }));
+        const turns = [{ role: 'user', content: instructions(ctx.model) }, ...history, { role: 'user', content: userText }];
+        const { text, truncated } = await sample(turns, {
+          tools, signal, modelTier: tier(),
+          onText: ({ text }) => hooks.onText(text),
+        });
+        return { text, truncated };
+      },
+    };
+  }
+
+  /** Brain 2: your own Anthropic API key through server.js (classic tool-use loop). */
+  function AnthropicApi(endpoint, tier) {
+    return {
+      id: 'anthropic-api', label: 'Claude API (your key)',
+      async turn({ ctx, history, userText, hooks, signal, log }) {
+        const toolList = buildTools(ctx);
+        const messages = [...history.map(m => ({ role: m.role, content: m.content })), { role: 'user', content: userText }];
+        let text = '';
+        for (let round = 0; round < 8; round++) {
+          const res = await fetch(endpoint, {
+            method: 'POST', signal, headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              tier: tier(), max_tokens: 1200, system: instructions(ctx.model), messages,
+              tools: toolList.map(t => ({ name: t.name, description: t.description, input_schema: t.inputSchema })),
+            }),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw { code: 'upstream_error', message: data.error?.message || data.error || `API error ${res.status}` };
+          messages.push({ role: 'assistant', content: data.content });
+          const said = data.content.filter(b => b.type === 'text').map(b => b.text).join('\n').trim();
+          if (said) { text = text ? text + '\n\n' + said : said; hooks.onText(text); }
+          if (data.stop_reason !== 'tool_use') return { text, truncated: data.stop_reason === 'max_tokens' };
+          const calls = data.content.filter(b => b.type === 'tool_use');
+          const results = await Promise.all(calls.map(async c => {
+            const tool = toolList.find(t => t.name === c.name);
+            const r = tool ? await runTool(tool, c.input, hooks, signal) : { ok: false, error: `Unknown tool ${c.name}` };
+            log.push({ name: c.name, input: c.input, ...r });
+            return { type: 'tool_result', tool_use_id: c.id, content: JSON.stringify(r.ok ? r.result : { error: r.error }), is_error: !r.ok };
+          }));
+          messages.push({ role: 'user', content: results });
+        }
+        return { text: text || 'I stopped after 8 tool rounds. Try a narrower question.', truncated: true };
+      },
+    };
+  }
+
+  /** Brain 3: any OpenAI-compatible model (Groq, Gemini) through server.js — the same tool-use loop. */
+  function OpenAICompatible(endpoint, tier, label) {
+    return {
+      id: 'openai-compatible', label: label || 'AI (own key)',
+      async turn({ ctx, history, userText, hooks, signal, log }) {
+        const toolList = buildTools(ctx);
+        const messages = [
+          { role: 'system', content: instructions(ctx.model) },
+          ...history.map(m => ({ role: m.role, content: m.content })),
+          { role: 'user', content: userText },
+        ];
+        const tools = toolList.map(t => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.inputSchema } }));
+        let text = '';
+        for (let round = 0; round < 8; round++) {
+          const res = await fetch(endpoint, {
+            method: 'POST', signal, headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ tier: tier(), max_tokens: 1200, messages, tools }),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw { code: res.status === 429 ? 'rate_limited' : 'upstream_error', message: data.error?.message || data.error || `API error ${res.status}` };
+          const choice = (data.choices || [])[0] || {};
+          const msg = choice.message || {};
+          const calls = Array.isArray(msg.tool_calls) ? msg.tool_calls : [];
+          messages.push(Object.assign({ role: 'assistant', content: msg.content || '' }, calls.length ? { tool_calls: calls } : {}));
+          const said = String(msg.content || '').trim();
+          if (said) { text = text ? text + '\n\n' + said : said; hooks.onText(text); }
+          if (!calls.length) return { text: text || 'Done.', truncated: choice.finish_reason === 'length' };
+          for (const c of calls) {
+            const name = c.function && c.function.name;
+            let input = {};
+            try { input = JSON.parse((c.function && c.function.arguments) || '{}') || {}; } catch { input = {}; }
+            const tool = toolList.find(t => t.name === name);
+            const r = tool ? await runTool(tool, input, hooks, signal) : { ok: false, error: `Unknown tool ${name}` };
+            log.push({ name, input, ...r });
+            messages.push({ role: 'tool', tool_call_id: c.id, content: JSON.stringify(r.ok ? r.result : { error: r.error }) });
+          }
+        }
+        return { text: text || 'I stopped after 8 tool rounds. Try a narrower question.', truncated: true };
+      },
+    };
+  }
+
+  // ---------- Guided demo (no AI): same tools, scripted calls ----------
+  const SCENARIOS = [
+    {
+      id: 'vaccines', chip: '400 pallets of vaccines, 2–8 °C',
+      prompt: 'We are a pharma company. We need to store 400 pallets of vaccines at 2–8 °C, about 450 kg per pallet. Where would they go?',
+      script: [['find_space', { goods: 'Vaccines', pallets: 400, temperature: 'chilled', weight_kg_per_pallet: 450 }], ['draw_route', { plan_id: '$1' }]],
+    },
+    {
+      id: 'mixed', chip: 'Shampoo + lithium batteries',
+      prompt: 'We have 300 pallets of shampoo and 60 pallets of lithium-ion batteries (UN3480, class 9). Can you place both?',
+      script: [['find_space', { goods: 'Shampoo', pallets: 300, temperature: 'ambient' }], ['find_space', { goods: 'Lithium-ion batteries', pallets: 60, hazmat_class: '9' }], ['draw_route', { plan_id: '$1' }], ['draw_route', { plan_id: '$2' }], ['move_camera', { target: 'overview' }]],
+    },
+    {
+      id: 'phones', chip: '250 pallets of smartphones',
+      prompt: 'We import smartphones. We need secure storage for 250 pallets, about 300 kg each.',
+      script: [['find_space', { goods: 'Smartphones', pallets: 250, high_value: true, weight_kg_per_pallet: 300 }], ['draw_route', { plan_id: '$1' }]],
+    },
+    {
+      id: 'journey', chip: 'Watch a pallet arrive',
+      prompt: 'Show me how one pallet of our vaccines would get from the truck to its shelf. We have 100 pallets at 2–8 °C.',
+      script: [['find_space', { goods: 'Vaccines', pallets: 100, temperature: 'chilled' }], ['follow_pallet', { plan_id: '$1' }]],
+    },
+    {
+      id: 'frozen', chip: 'Frozen seafood?',
+      prompt: 'Could you also take 100 pallets of frozen seafood at −18 °C?',
+      script: [['find_space', { goods: 'Frozen seafood', pallets: 100, temperature: 'frozen' }]],
+    },
+  ];
+
+  function narrate(log) {
+    const parts = [];
+    for (const step of log) {
+      if (step.name !== 'find_space' || !step.ok) continue;
+      const r = step.result;
+      if (!r.eligible) { parts.push(`${r.goods}: not possible here. ${r.reason}${r.suggestion ? ' ' + r.suggestion : ''}`); continue; }
+      const route = log.find(s => s.name === 'draw_route' && s.ok && s.result.plan_id === r.plan_id);
+      parts.push(`${r.plan_id} (${r.goods}): ${r.pallets_reserved} of ${r.pallets_requested} pallets reserved in zone ${r.zone} (${r.zone_name}, ${r.temperature}), ${r.rows}. Main dock ${r.main_dock}` +
+        (route ? `, ${route.result.distance_m} m to the middle of the block` : '') +
+        `. Put-away is about ${r.putaway_forklift_hours} forklift-hours.` + (r.shortfall ? ` Short by ${r.shortfall} pallets: ${r.suggestion}` : ''));
+    }
+    for (const step of log) {
+      if (step.name !== 'follow_pallet' || !step.ok) continue;
+      const r = step.result;
+      parts.push(`Watch one pallet of ${r.plan_id}: from dock ${r.dock}, ${r.distance_m} m to ${r.location}, lifted to level ${r.level} (${r.lift_height_m} m). One round trip takes about ${r.cycle_seconds} s.`);
+    }
+    parts.push('Scripted walkthrough: the same tools the AI uses, with fixed inputs.');
+    return parts.join('\n\n');
+  }
+
+  function GuidedDemo() {
+    return {
+      id: 'guided', label: 'Guided demo (no AI)',
+      async turn({ ctx, scenario, hooks, signal, log }) {
+        if (!scenario) return { text: 'AI chat is not available in this view, so typed questions cannot be answered. Pick one of the guided scenarios to watch the same tools run.' };
+        const tools = buildTools(ctx);
+        const ids = [];
+        for (const [name, raw] of scenario.script) {
+          const input = JSON.parse(JSON.stringify(raw).replace(/"\$(\d)"/g, (_, n) => JSON.stringify(ids[n - 1] || 'P0')));
+          await new Promise(r => setTimeout(r, 650));
+          const r = await runTool(tools.find(t => t.name === name), input, hooks, signal);
+          log.push({ name, input, ...r });
+          if (name === 'find_space' && r.ok && r.result.plan_id) ids.push(r.result.plan_id);
+        }
+        const text = narrate(log);
+        hooks.onText(text);
+        return { text };
+      },
+    };
+  }
+
+  root.WarehouseAgent = { instructions, buildTools, groundingCheck, numbersIn, ClaudeInArtifact, AnthropicApi, OpenAICompatible, GuidedDemo, SCENARIOS, PLAN_COLORS };
+})(typeof self !== 'undefined' ? self : this);
+
+</script>
+<script>
+/*
+ * Test bench — 22 realistic client requests with automatic scoring.
+ * Each case starts from the same fresh site, sends one message to the agent,
+ * then checks what the agent DID (tool calls, reservations) and SAID
+ * (required facts, no invented numbers). Deterministic tool tests run first
+ * and need no AI.
+ */
+(function (root) {
+  'use strict';
+  const W = root.WarehouseCore;
+
+  // ---------- Cases ----------
+  // expect keys: zones (find_space zones, in any order), reserved (total pallets reserved after),
+  // ineligible (a find_space returned eligible:false), plans (number of plans after),
+  // calls (tools that must be called), noCalls (tools that must NOT be called),
+  // says (regexes the answer must match), grounded (default true)
+  const CASES = [
+    { id: 1, cat: 'Basic', prompt: 'We need to store 400 pallets of vaccines at 2–8 °C, about 450 kg each. Where would they go?', expect: { zones: ['C'], reserved: 400, calls: ['find_space', 'draw_route'] } },
+    { id: 2, cat: 'Basic', prompt: 'Can you take 300 pallets of shampoo?', expect: { zones: ['A'], reserved: 300, calls: ['draw_route'] } },
+    { id: 3, cat: 'Dangerous goods', prompt: '60 pallets of lithium-ion batteries, UN3480.', expect: { zones: ['H'], reserved: 60 } },
+    { id: 4, cat: 'Capacity limit', prompt: 'We import smartphones and need secure storage for 250 pallets, about 300 kg each.', expect: { zones: ['S'], reserved: 186, says: [/64|186/] } },
+    { id: 5, cat: 'Rules', prompt: 'Could you store 100 pallets of frozen seafood at −18 °C?', expect: { ineligible: true, plans: 0, says: [/frozen|−18|-18|freez/i] } },
+    { id: 6, cat: 'Rules', prompt: 'We have 50 pallets of propane cylinders, DG class 2.1.', expect: { ineligible: true, plans: 0, says: [/2\.1|not licen|cannot|can't|unable/i] } },
+    { id: 7, cat: 'Rules', prompt: '20 pallets of a flammable (class 3) medical product that must be kept at 2–8 °C.', expect: { ineligible: true, plans: 0 } },
+    { id: 8, cat: 'Rules', prompt: '80 pallets of steel parts, 1,200 kg per pallet.', expect: { ineligible: true, plans: 0, says: [/1[,.]?000|weight|heavy|beam/i] } },
+    { id: 9, cat: 'Rules', prompt: '40 pallets of mattresses, each pallet is 1.9 m tall.', expect: { ineligible: true, plans: 0, says: [/1\.6|height|tall/i] } },
+    { id: 10, cat: 'Reasoning', prompt: 'We need space for 150 pallets of laptops.', expect: { zones: ['S'], reserved: 150 } },
+    { id: 11, cat: 'Dangerous goods', prompt: '120 pallets of solvent-based paint (flammable liquid, class 3).', expect: { zones: ['H'], reserved: 120 } },
+    { id: 12, cat: 'Reasoning', prompt: 'We sell ice cream. Can you take 200 pallets?', expect: { ineligible: true, plans: 0, says: [/frozen|freez|−18|-18/i] } },
+    { id: 13, cat: 'Multi-step', prompt: 'Two products: 100 pallets of rice and 30 pallets of car batteries (corrosive, class 8). Place both.', expect: { zones: ['A', 'H'], reserved: 130, plans: 2 } },
+    { id: 14, cat: 'Navigation', prompt: 'Show me the chilled zone.', expect: { calls: ['move_camera'], noCalls: ['find_space'] } },
+    { id: 15, cat: 'Facts', prompt: 'How many free pallet positions does the dangerous goods store have right now?', expect: { noCalls: ['find_space'], says: [/250/] } },
+    {
+      id: 16, cat: 'Re-planning', prompt: 'Actually, make that 350 pallets instead of 200.',
+      setup: { request: { goods: 'Detergent', pallets: 200, temperature: 'ambient' }, user: 'We need space for 200 pallets of detergent.' },
+      expect: { calls: ['release_plan', 'find_space'], reserved: 350, plans: 1 },
+    },
+    {
+      id: 17, cat: 'Report', prompt: 'Please write a client summary for Acme Pharma.',
+      setup: { request: { goods: 'Vaccines', pallets: 100, temperature: 'chilled' }, user: 'We need 100 pallets of vaccines at 2–8 °C.' },
+      expect: { calls: ['create_client_report'], noCalls: ['find_space'], reserved: 100 },
+    },
+    { id: 18, cat: 'Honesty', prompt: 'Is this a real DHL warehouse?', expect: { noCalls: ['find_space'], says: [/sample|fictional|not real|demo/i] } },
+    { id: 19, cat: 'Off-topic', prompt: 'Write me a poem about cats.', expect: { noCalls: ['find_space', 'draw_route', 'create_client_report'] } },
+    { id: 20, cat: 'Capacity limit', prompt: 'We have 900 pallets of chilled yogurt.', expect: { zones: ['C'], reserved: 793, says: [/107|793|short/i] } },
+    {
+      id: 21, cat: 'Immersive', prompt: 'Show me how one of those pallets would get from the truck to its shelf.',
+      setup: { request: { goods: 'Vaccines', pallets: 100, temperature: 'chilled' }, user: 'We need 100 pallets of vaccines at 2–8 °C.' },
+      expect: { calls: ['follow_pallet'], noCalls: ['find_space'], reserved: 100 },
+    },
+    { id: 22, cat: 'Immersive', prompt: 'Give me a short guided tour of the site.', expect: { calls: ['give_tour'], noCalls: ['find_space'] } },
+  ];
+
+  // ---------- Scoring ----------
+  function score(c, run, groundingCheck) {
+    const e = c.expect;
+    const checks = [];
+    const add = (name, pass, detail) => checks.push({ name, pass: !!pass, detail });
+    const finds = run.log.filter(s => s.name === 'find_space' && s.ok);
+    const called = new Set(run.log.map(s => s.name));
+    if (e.zones) {
+      const got = finds.filter(f => f.result.eligible).map(f => f.result.zone).sort();
+      add('Right zone', JSON.stringify(got) === JSON.stringify([...e.zones].sort()), `expected ${e.zones.join('+')}, got ${got.join('+') || 'none'}`);
+    }
+    if (e.reserved != null) add('Right quantity', run.reserved === e.reserved, `expected ${e.reserved} reserved, got ${run.reserved}`);
+    if (e.ineligible) add('Applied the rule', finds.some(f => !f.result.eligible), finds.length ? 'checked with find_space' : 'never checked with find_space');
+    if (e.plans != null) add('No wrong reservation', run.plans === e.plans, `expected ${e.plans} plan(s), got ${run.plans}`);
+    for (const t of e.calls || []) add(`Called ${t}`, called.has(t), called.has(t) ? 'yes' : 'not called');
+    for (const t of e.noCalls || []) add(`Did not call ${t}`, !called.has(t), called.has(t) ? 'called it' : 'correct');
+    for (const re of e.says || []) add('Said the key fact', re.test(run.text), `answer ${re.test(run.text) ? 'matches' : 'does not match'} ${re}`);
+    if (e.grounded !== false) {
+      const captions = run.log.filter(s => s.name === 'give_tour' && s.ok && s.input && Array.isArray(s.input.stops)).flatMap(s => s.input.stops.map(x => String(x.caption || ''))).join(' ');
+      const g = groundingCheck(run.text + ' ' + captions, run.sources);
+      add('No invented numbers', g.ungrounded.length === 0, g.ungrounded.length ? `not in data: ${g.ungrounded.join(', ')}` : `${g.checked} checked`);
+    }
+    return { pass: checks.every(x => x.pass), checks };
+  }
+
+  // ---------- Deterministic tool tests (no AI) ----------
+  function toolTests() {
+    const out = [];
+    const t = (name, fn) => { try { const r = fn(); out.push({ name, pass: r !== false }); } catch (e) { out.push({ name, pass: false, detail: e.message }); } };
+    const fresh = () => new W.WarehouseModel(W.generateSlots(2026));
+    t('Site loads with 10,000+ pallet positions', () => fresh().slots.length > 10000);
+    t('Zone totals add up', () => fresh().zoneStatus().every(z => z.occupied + z.blocked + z.free_now === z.total_positions));
+    t('Chilled goods only go to zone C', () => fresh().findSpace({ pallets: 50, temperature: 'chilled' }).zone === 'C');
+    t('Class 9 batteries go to the DG store', () => fresh().findSpace({ pallets: 5, hazmat_class: '9' }).zone === 'H');
+    t('Frozen goods are refused', () => fresh().findSpace({ pallets: 5, temperature: 'frozen' }).eligible === false);
+    t('Unlicensed DG class 2.1 is refused', () => fresh().findSpace({ pallets: 5, hazmat_class: '2.1' }).eligible === false);
+    t('Overweight pallets are refused', () => fresh().findSpace({ pallets: 5, weight_kg_per_pallet: 1200 }).eligible === false);
+    t('Heavy pallets avoid weak upper beams', () => { const m = fresh(); const r = m.findSpace({ pallets: 100, weight_kg_per_pallet: 950 }); return m.planSlots(r.plan_id).every(s => s.maxKg >= 950); });
+    t('Occupied and blocked slots are never used', () => { const m = fresh(); const r = m.findSpace({ pallets: 1500 }); return m.planSlots(r.plan_id).every(s => s.status === 'free'); });
+    t('No slot is reserved twice', () => { const m = fresh(); m.findSpace({ pallets: 800 }); m.findSpace({ pallets: 800 }); const a = m.plans.flatMap(p => p._slots); return new Set(a).size === a.length; });
+    t('Shortfall is reported, never hidden', () => { const r = fresh().findSpace({ pallets: 1000, high_value: true }); return r.shortfall > 0 && r.pallets_reserved + r.shortfall === 1000; });
+    t('Releasing a plan frees every slot', () => { const m = fresh(); const before = m.zoneStatus()[0].free_now; m.releasePlan(m.findSpace({ pallets: 70 }).plan_id); return m.zoneStatus()[0].free_now === before; });
+    t('Routes start at a dock that serves the zone', () => { const m = fresh(); const r = m.findSpace({ pallets: 10, temperature: 'chilled' }); return ['D8', 'D9', 'D10'].includes(m.planRoute(r.plan_id).dock); });
+    t('CSV export and import round-trip', () => { const s = W.generateSlots(); return W.fromCSV(W.toCSV(s)).slots.length === s.length; });
+    return out;
+  }
+
+  // ---------- UI ----------
+  let mounted = false, running = false, stopFlag = false, results = [];
+  const el = (tag, attrs = {}, ...kids) => {
+    const n = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs)) { if (k === 'class') n.className = v; else if (k === 'text') n.textContent = v; else if (k.startsWith('on')) n.addEventListener(k.slice(2), v); else n.setAttribute(k, v); }
+    for (const k of kids) if (k != null) n.append(k);
+    return n;
+  };
+
+  function mount(host, api) {
+    if (mounted) { updateAvailability(api); return; }
+    mounted = true;
+    const tt = toolTests();
+    const ttPass = tt.filter(x => x.pass).length;
+    host.append(
+      el('div', {}, el('h2', { text: 'Test bench' }),
+        el('p', { style: 'margin-top:8px', text: `Proof that the agent behaves: ${CASES.length} realistic client requests, each scored on what the agent did and what it said. Every case starts from the same fresh site.` })),
+      el('div', { class: 'grid2' },
+        el('div', { class: 'card' },
+          el('div', { class: 'score' },
+            el('div', {}, el('div', { class: 'big', id: 'ev-score', text: '–' }), el('div', { class: 'lbl', text: 'Agent cases passed' })),
+            el('div', {}, el('div', { class: 'big', id: 'ev-grounded', text: '–' }), el('div', { class: 'lbl', text: 'Answers with no invented numbers' })),
+            el('div', {}, el('div', { class: 'big', id: 'ev-time', text: '–' }), el('div', { class: 'lbl', text: 'Avg seconds per case' }))),
+          el('div', { style: 'display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;align-items:center' },
+            el('button', { class: 'btn primary', id: 'ev-run', type: 'button', text: `Run all ${CASES.length} cases` }),
+            el('button', { class: 'btn', id: 'ev-stop', type: 'button', text: 'Stop', hidden: '' }),
+            el('button', { class: 'btn', id: 'ev-copy', type: 'button', text: 'Copy results', disabled: '' }),
+            el('span', { class: 'note', id: 'ev-status' })),
+          el('p', { class: 'note', id: 'ev-avail', style: 'margin-top:10px' })),
+        el('div', { class: 'card' },
+          el('h3', { text: `Tool tests: ${ttPass}/${tt.length} passed` }),
+          el('p', { class: 'note', style: 'margin-bottom:8px', text: 'Run in your browser on every load. They test the deterministic tools the agent uses, with no AI involved.' }),
+          el('ul', { style: 'margin:0;padding-left:0;list-style:none;font-size:13.5px;display:grid;gap:2px' }, ...tt.map(x => el('li', { style: x.pass ? '' : 'color:var(--critical)', text: (x.pass ? '✓ ' : '✗ ') + x.name + (x.detail ? ` (${x.detail})` : '') }))))),
+      el('div', { class: 'card tablewrap' },
+        el('table', { class: 'data', id: 'ev-table' },
+          el('thead', {}, el('tr', {}, ...['#', 'Type', 'Client request', 'Result', 'Checks', 'Tools used'].map(h => el('th', { text: h })))),
+          el('tbody', {}, ...CASES.map(c => el('tr', { id: 'ev-row-' + c.id },
+            el('td', { text: String(c.id) }), el('td', { text: c.cat }),
+            el('td', { style: 'min-width:240px', text: c.prompt + (c.setup ? `  (follow-up to: "${c.setup.user}")` : '') }),
+            el('td', {}, el('span', { class: 'pill wait', text: 'Not run' })),
+            el('td', { class: 'note', style: 'min-width:220px' }), el('td', { class: 'note mono' })))))),
+      el('p', { class: 'note', text: 'Scoring is automatic and strict: a case passes only if every check passes. "No invented numbers" compares every number in the answer (except small counts up to 10) with the tool results and site data.' }));
+    host.querySelector('#ev-run').addEventListener('click', () => runAll(api));
+    host.querySelector('#ev-stop').addEventListener('click', () => { stopFlag = true; api.state.evalCtl && api.state.evalCtl.abort(); });
+    host.querySelector('#ev-copy').addEventListener('click', e => copyResults(e.target));
+    updateAvailability(api);
+  }
+
+  function updateAvailability(api) {
+    const live = api.state.brain && api.state.brain.id !== 'guided';
+    document.getElementById('ev-run').disabled = !live || running;
+    document.getElementById('ev-avail').textContent = live
+      ? `Runs on: ${api.state.brain.label}, ${api.state.tier === 'quick' ? 'Fast' : 'Thorough'} model (switch on the Preview tab). Uses your Claude usage: about ${CASES.length} short conversations.`
+      : 'Agent cases need the AI, which is not available in this view. The tool tests on the right still run.';
+  }
+
+  function setRow(id, status, checks, tools) {
+    const row = document.getElementById('ev-row-' + id);
+    const cells = row.children;
+    cells[3].innerHTML = '';
+    cells[3].append(el('span', { class: 'pill ' + (status === 'pass' ? 'pass' : status === 'fail' ? 'fail' : 'wait'), text: status === 'pass' ? 'Pass' : status === 'fail' ? 'Fail' : status }));
+    cells[4].innerHTML = '';
+    if (checks) cells[4].append(...checks.map(ch => el('div', { style: ch.pass ? '' : 'color:var(--critical)', text: `${ch.pass ? '✓' : '✗'} ${ch.name}${ch.pass ? '' : ': ' + ch.detail}` })));
+    cells[5].textContent = tools || '';
+  }
+
+  async function runAll(api) {
+    if (running) return;
+    const { state } = api;
+    running = true; stopFlag = false; results = [];
+    document.getElementById('ev-run').hidden = true;
+    document.getElementById('ev-stop').hidden = false;
+    document.getElementById('ev-copy').disabled = true;
+    const status = document.getElementById('ev-status');
+    const A = root.WarehouseAgent;
+    if (state.model.slots.length !== W.generateSlots(2026).length) api.loadSlots(W.generateSlots(2026));
+    for (const c of CASES) setRow(c.id, 'Queued');
+    for (const c of CASES) {
+      if (stopFlag) { setRow(c.id, 'Skipped'); continue; }
+      status.textContent = `Running case ${c.id} of ${CASES.length}…`;
+      setRow(c.id, 'Running…');
+      api.reset();
+      let history = [];
+      if (c.setup) {
+        const r = state.model.findSpace(c.setup.request);
+        state.viewer && state.viewer.showPlan(r.plan_id, state.model.planSlots(r.plan_id), api.planColor(r.plan_id));
+        history = [{ role: 'user', content: c.setup.user }, { role: 'assistant', content: `${r.plan_id}: reserved ${r.pallets_reserved} pallets of ${r.goods} in zone ${r.zone} (${r.zone_name}), ${r.rows}, main dock ${r.main_dock}.` }];
+      }
+      const sitePrompt = A.instructions(state.model);
+      const log = [];
+      const t0 = performance.now();
+      const hooks = { onStepStart: () => null, onStepEnd: () => {}, onText: () => {} };
+      state.evalCtl = new AbortController();
+      let text = '', error = null;
+      try {
+        const r = await state.brain.turn({
+          ctx: { model: state.model, viewer: state.viewer, ui: { planColor: api.planColor, renderReport: () => {}, refresh: api.refresh } },
+          history, userText: c.prompt, hooks, signal: state.evalCtl.signal, log,
+        });
+        text = r.text;
+      } catch (e) { error = e && (e.code || e.message) || 'error'; text = (e && e.text) || ''; }
+      const secs = (performance.now() - t0) / 1000;
+      const run = {
+        log, text, sources: [sitePrompt, c.prompt, ...history.map(h => h.content), ...log.map(s => s.result || '')],
+        reserved: state.model.plans.reduce((a, p) => a + p.pallets_reserved, 0), plans: state.model.plans.length,
+      };
+      const s = error ? { pass: false, checks: [{ name: 'Agent answered', pass: false, detail: String(error) }] } : score(c, run, A.groundingCheck);
+      const grounded = !error && s.checks.find(x => x.name === 'No invented numbers')?.pass;
+      results.push({ id: c.id, cat: c.cat, prompt: c.prompt, pass: s.pass, grounded, secs, checks: s.checks, tools: log.map(x => x.name), answer: text });
+      setRow(c.id, s.pass ? 'pass' : 'fail', s.checks, log.map(x => x.name).join(' → ') || '(none)');
+      updateScore();
+      if (error === 'rate_limited' || error === 'not_granted' || error === 'cancelled') { stopFlag = true; status.textContent = error === 'cancelled' ? 'Stopped.' : `Stopped: ${error}.`; }
+    }
+    api.reset();
+    running = false;
+    document.getElementById('ev-run').hidden = false;
+    document.getElementById('ev-stop').hidden = true;
+    document.getElementById('ev-copy').disabled = !results.length;
+    if (!stopFlag) status.textContent = `Finished ${new Date().toLocaleString()}.`;
+    updateAvailability(api);
+  }
+
+  function updateScore() {
+    const n = results.length;
+    const pass = results.filter(r => r.pass).length;
+    const g = results.filter(r => r.grounded).length;
+    document.getElementById('ev-score').textContent = `${pass}/${n}`;
+    document.getElementById('ev-grounded').textContent = `${g}/${n}`;
+    document.getElementById('ev-time').textContent = n ? (results.reduce((a, r) => a + r.secs, 0) / n).toFixed(1) : '–';
+  }
+
+  async function copyResults(btn) {
+    const n = results.length, pass = results.filter(r => r.pass).length;
+    const md = [`Warehouse Preview Agent — test bench results (${new Date().toLocaleDateString()})`, `Passed ${pass}/${n} · no invented numbers ${results.filter(r => r.grounded).length}/${n}`, '',
+      '| # | Type | Result | Failed checks | Tools |', '|---|---|---|---|---|',
+      ...results.map(r => `| ${r.id} | ${r.cat} | ${r.pass ? 'Pass' : 'Fail'} | ${r.checks.filter(c => !c.pass).map(c => `${c.name}: ${c.detail}`).join('; ') || '–'} | ${r.tools.join(' → ') || '–'} |`)].join('\n');
+    try { await navigator.clipboard.writeText(md); btn.textContent = 'Copied'; } catch { btn.textContent = 'Copy failed'; }
+    setTimeout(() => (btn.textContent = 'Copy results'), 1800);
+  }
+
+  root.WarehouseEval = { CASES, score, toolTests, mount };
+})(typeof self !== 'undefined' ? self : this);
+
+/* "How it works" page: architecture, what is real vs sample, load your own site (CSV), roadmap. */
+(function (root) {
+  'use strict';
+  const W = root.WarehouseCore;
+  let mounted = false;
+
+  const DIAGRAM = `
+<svg viewBox="0 0 900 360" role="img" aria-label="The agent decides, tools compute, the 3D view shows the result">
+  <defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--ink-3)"/></marker></defs>
+  <g font-family="var(--font-body)" font-size="13" fill="var(--ink)">
+    <rect x="16" y="120" width="150" height="72" rx="6" fill="var(--surface-2)" stroke="var(--line)"/>
+    <text x="91" y="150" text-anchor="middle" font-weight="600">Client</text>
+    <text x="91" y="170" text-anchor="middle" fill="var(--ink-2)" font-size="12">asks in plain words</text>
+
+    <rect x="216" y="104" width="190" height="104" rx="6" fill="var(--safety-soft)" stroke="var(--safety)" stroke-width="2"/>
+    <text x="311" y="134" text-anchor="middle" font-weight="600">AI agent (Claude)</text>
+    <text x="311" y="156" text-anchor="middle" fill="var(--ink-2)" font-size="12">plans · picks tools</text>
+    <text x="311" y="174" text-anchor="middle" fill="var(--ink-2)" font-size="12">re-plans · explains</text>
+    <text x="311" y="192" text-anchor="middle" fill="var(--ink-2)" font-size="12">never does the maths</text>
+
+    <rect x="460" y="40" width="210" height="282" rx="6" fill="var(--surface)" stroke="var(--line)"/>
+    <text x="476" y="66" font-weight="600">Tools (deterministic code)</text>
+    <g font-family="var(--font-mono)" font-size="12" fill="var(--ink-2)">
+      <text x="476" y="94">find_space</text><text x="476" y="118">draw_route</text><text x="476" y="142">move_camera</text>
+      <text x="476" y="166">get_site_status</text><text x="476" y="190">release_plan</text><text x="476" y="214">create_client_report</text>
+      <text x="476" y="238">follow_pallet</text><text x="476" y="262">give_tour</text>
+    </g>
+    <text x="476" y="300" fill="var(--ink-3)" font-size="11.5">rules · capacity · routes · experience</text>
+
+    <rect x="720" y="40" width="164" height="96" rx="6" fill="var(--surface)" stroke="var(--line)"/>
+    <text x="802" y="70" text-anchor="middle" font-weight="600">Site data</text>
+    <text x="802" y="92" text-anchor="middle" fill="var(--ink-2)" font-size="12">slots.csv (WMS export)</text>
+    <text x="802" y="110" text-anchor="middle" fill="var(--ink-2)" font-size="12">zone rules · docks</text>
+
+    <rect x="720" y="176" width="164" height="96" rx="6" fill="var(--surface)" stroke="var(--line)"/>
+    <text x="802" y="206" text-anchor="middle" font-weight="600">3D view</text>
+    <text x="802" y="228" text-anchor="middle" fill="var(--ink-2)" font-size="12">built from the data</text>
+    <text x="802" y="246" text-anchor="middle" fill="var(--ink-2)" font-size="12">walk · journeys · tours</text>
+
+    <rect x="216" y="252" width="190" height="56" rx="6" fill="var(--surface)" stroke="var(--good)"/>
+    <text x="311" y="276" text-anchor="middle" font-weight="600">Number check</text>
+    <text x="311" y="294" text-anchor="middle" fill="var(--ink-2)" font-size="12">every figure traced to data</text>
+  </g>
+  <g stroke="var(--ink-3)" stroke-width="1.4" fill="none">
+    <path d="M166 150H214" marker-end="url(#ar)"/><path d="M214 166H168" marker-end="url(#ar)"/>
+    <path d="M406 140H458" marker-end="url(#ar)"/><path d="M458 172H408" marker-end="url(#ar)"/>
+    <path d="M670 88H718" marker-end="url(#ar)" marker-start="url(#ar)"/>
+    <path d="M670 224H718" marker-end="url(#ar)"/>
+    <path d="M311 208V250" marker-end="url(#ar)"/>
+  </g>
+  <g font-family="var(--font-body)" font-size="11.5" fill="var(--ink-3)">
+    <text x="432" y="132" text-anchor="middle">calls</text><text x="432" y="190" text-anchor="middle">results</text>
+  </g>
+</svg>`;
+
+  const el = (tag, attrs = {}, ...kids) => {
+    const n = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs)) { if (k === 'class') n.className = v; else if (k === 'text') n.textContent = v; else if (k === 'html') n.innerHTML = v; else if (k.startsWith('on')) n.addEventListener(k.slice(2), v); else n.setAttribute(k, v); }
+    for (const k of kids) if (k != null) n.append(k);
+    return n;
+  };
+
+  function table(head, rows) {
+    return el('div', { class: 'tablewrap' }, el('table', { class: 'data' },
+      el('thead', {}, el('tr', {}, ...head.map(h => el('th', { text: h })))),
+      el('tbody', {}, ...rows.map(r => el('tr', {}, ...r.map(c => el('td', { text: c })))))));
+  }
+
+  function mount(host, api) {
+    if (mounted) return;
+    mounted = true;
+    const status = el('p', { class: 'note', id: 'csv-status', style: 'margin-top:8px' });
+    const file = el('input', { type: 'file', id: 'csv-file', accept: '.csv,text/csv' });
+    file.addEventListener('change', async () => {
+      const f = file.files[0];
+      if (!f) return;
+      if (f.size > 15e6) { status.textContent = 'That file is over 15 MB. Split it by zone and try again.'; return; }
+      const { slots, errors } = W.fromCSV(await f.text());
+      if (!slots.length) { status.textContent = `Could not load it. ${errors.join(' ')}`; return; }
+      if (slots.length > 60000) { status.textContent = `${slots.length} positions is more than this prototype draws smoothly (60,000). Load one building at a time.`; return; }
+      api.loadSlots(slots);
+      status.textContent = `Loaded ${slots.length.toLocaleString('en-IN')} pallet positions from ${f.name}` + (errors.length ? `, skipped some rows (${errors.slice(0, 3).join('; ')}${errors.length > 3 ? '…' : ''}).` : '.') + ' The 3D view and the agent now use this data.';
+    });
+    const header = W.CSV_COLUMNS.join(',');
+    const copyHead = el('button', { class: 'btn', type: 'button', text: 'Copy CSV header' });
+    copyHead.addEventListener('click', async () => { try { await navigator.clipboard.writeText(header + '\nA-01-001-1,A,1,1,1,-73.53,-46.325,-76.3,1000,free,'); copyHead.textContent = 'Copied'; } catch { copyHead.textContent = 'Copy failed'; } setTimeout(() => (copyHead.textContent = 'Copy CSV header'), 1600); });
+    const restore = el('button', { class: 'btn', type: 'button', text: 'Restore sample site' });
+    restore.addEventListener('click', () => { api.loadSlots(W.generateSlots(2026)); status.textContent = 'Sample site restored.'; });
+
+    host.append(
+      el('div', {}, el('h2', { text: 'How it works' }),
+        el('p', { style: 'margin-top:8px', text: 'The AI decides what to do. Deterministic tools do every calculation. The 3D view shows the result. That split is what makes the answers trustworthy enough for a client conversation.' })),
+      el('div', { class: 'card diagram', html: DIAGRAM }),
+      el('div', { class: 'grid2' },
+        el('div', { class: 'card' }, el('h3', { text: 'One agent turn' }),
+          el('ol', { style: 'margin:0;padding-left:20px;display:grid;gap:4px' },
+            el('li', { text: 'The agent reads the request together with live site data: free space, zone rules, docks.' }),
+            el('li', { text: 'It decides which tools to call, for example one find_space per type of goods.' }),
+            el('li', { text: 'The tools apply the rules, reserve positions and update the 3D view, then return results.' }),
+            el('li', { text: 'It reads the results and continues: draws routes, re-plans after a "no", or writes the report.' }),
+            el('li', { text: 'It answers in plain words. The page then checks every number against the data.' }))),
+        el('div', { class: 'card' }, el('h3', { text: 'Three ways it runs' }),
+          table(['Mode', 'When', 'Brain'], [
+            ['In Claude', 'This shared link, signed in to Claude', 'Claude, via the page'],
+            ['Own API key', 'Hosted online or on a laptop', 'Groq, Gemini or Claude'],
+            ['Guided demo', 'No AI available', 'Scripted, same tools'],
+          ]))),
+      el('div', { class: 'card' }, el('h3', { text: 'The immersive experience' }),
+        table(['Feature', 'What the client gets'], [
+          ['Walk inside', 'Eye-level walking through the aisles (keyboard, mouse or touch), with a live "you are here" readout'],
+          ['Follow a pallet', 'Truck docks, forklift carries one pallet along the real route and lifts it into its slot, captioned with the plan’s numbers'],
+          ['Guided tour', 'Camera stops with captions, read aloud when sound is on; the agent can write a tour for a specific client'],
+          ['Living site', 'Roof and lights from inside, trucks at the docks, forklifts at work, reversing beepers and hall ambience'],
+        ]),
+        el('p', { class: 'note', style: 'margin-top:8px', text: 'Captions are built from the same data and tools as the chat, and tour captions written by the agent go through the same number check.' })),
+      el('div', { class: 'card' }, el('h3', { text: "What's real and what's sample" }),
+        table(['Part', 'Status'], [
+          ['Warehouse layout, occupancy, client goods', 'Sample: fictional site "Demo DC-01, Bhiwandi"'],
+          ['Zone rules (temperature, DG classes, beam loads, height)', 'Real logic, typical values; set per site'],
+          ['AI agent and tool calling', 'Real: Claude chooses and calls the tools live'],
+          ['3D view', 'Real: generated from the data, nothing hand-placed'],
+          ['Travel and put-away estimates', `Estimates: ${W.ASSUMPTIONS.forkliftSpeed_mps} m/s forklift, ${W.ASSUMPTIONS.handlingPerPallet_s} s handling, +${W.ASSUMPTIONS.liftPerLevel_s} s per level`],
+        ])),
+      el('div', { class: 'card' }, el('h3', { text: 'Load your own site' }),
+        el('p', { text: 'Export pallet locations from a warehouse management system, map the columns below, and load the file. Data stays in this browser tab.' }),
+        el('pre', { class: 'mono', style: 'overflow-x:auto;background:var(--surface-2);padding:8px 10px;border-radius:6px;margin:10px 0' }, header),
+        el('div', { style: 'display:flex;gap:8px;flex-wrap:wrap;align-items:center' }, el('label', { for: 'csv-file', class: 'note', text: 'CSV file:' }), file, copyHead, restore),
+        status),
+      el('div', { class: 'card' }, el('h3', { text: 'Next steps for a production version' }),
+        el('ul', { style: 'margin:0;padding-left:20px;display:grid;gap:4px' },
+          el('li', { text: 'Live occupancy from the warehouse management system API instead of a CSV snapshot.' }),
+          el('li', { text: 'Floor plan in, layout out: a vision model drafts the rack layout from a drawing, a validator checks it, a person approves.' }),
+          el('li', { text: 'Photo-real building: overlay the data on a 3D scan (Gaussian splat) of the real site.' }),
+          el('li', { text: 'Quote support: storage and handling cost per plan, multi-site comparison.' }),
+          el('li', { text: 'Enterprise controls: single sign-on, per-client data isolation, audit log of every tool call.' }))),
+      el('p', { class: 'note', text: 'Concept prototype built for a hiring assignment. Not an official product of any company. All site data is fictional.' }));
+  }
+
+  root.WarehouseAbout = { mount };
+})(typeof self !== 'undefined' ? self : this);
+
+</script>
+<script>
+/* App wiring: model + 3D viewer + agent chat + tabs. */
+(function () {
+  'use strict';
+  const W = window.WarehouseCore, A = window.WarehouseAgent;
+  const $ = s => document.querySelector(s);
+  const el = (tag, attrs = {}, ...kids) => {
+    const n = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs)) {
+      if (k === 'class') n.className = v; else if (k === 'text') n.textContent = v; else if (k.startsWith('on')) n.addEventListener(k.slice(2), v); else n.setAttribute(k, v);
+    }
+    for (const k of kids) if (k != null) n.append(k);
+    return n;
+  };
+  const fmt = n => Number(n).toLocaleString('en-IN');
+
+  const state = {
+    model: new W.WarehouseModel(W.generateSlots(2026)),
+    viewer: null, brain: null, tier: 'quick', history: [], busy: false, ctl: null, currentMsg: null,
+  };
+  window.__app = state; // handy for debugging and the test bench
+
+  // ---------- 3D ----------
+  function startViewer() {
+    if (!window.THREE || !THREE.OrbitControls) {
+      $('#loading').textContent = 'The 3D library could not load. Check your connection and reload.';
+      return;
+    }
+    state.viewer = new WarehouseViewer($('#stage'), state.model, { onSelect: showSlot });
+    $('#loading').remove();
+    state.fx = state.viewer.fx = new WarehouseImmersive(state.viewer, state.model, { onMode, caption, location: whereAmI });
+  }
+
+  // ---------- Immersive UI ----------
+  const HINTS = {
+    orbit: 'Drag to rotate · scroll to zoom · click a pallet',
+    walk: 'W A S D or arrows to move · drag to look · Shift to run · Esc to leave',
+    journey: 'Esc to skip',
+    tour: 'Esc for the next stop',
+  };
+  const touchy = () => window.matchMedia('(pointer: coarse)').matches || window.innerWidth < 860;
+  function setBtn(id, pressed, label) {
+    const b = $(id); b.setAttribute('aria-pressed', String(pressed)); b.setAttribute('aria-label', label); b.querySelector('span').textContent = label;
+  }
+  function onMode(mode) {
+    const st = $('#stage');
+    st.classList.remove('mode-orbit', 'mode-walk', 'mode-journey', 'mode-tour');
+    st.classList.add('mode-' + mode);
+    $('#hint').textContent = HINTS[mode] || HINTS.orbit;
+    setBtn('#btn-walk', mode === 'walk', mode === 'walk' ? 'Exit walk' : 'Walk inside');
+    setBtn('#btn-tour', mode === 'tour', mode === 'tour' ? 'Stop tour' : 'Site tour');
+    $('#pad').hidden = !(mode === 'walk' && touchy());
+    $('#slot-card').hidden = true;
+  }
+  function caption(c) {
+    const box = $('#caption');
+    if (!c) { box.hidden = true; return; }
+    $('#cap-title').textContent = c.title || '';
+    $('#cap-text').textContent = c.text || '';
+    const steps = $('#cap-steps'); steps.innerHTML = '';
+    for (let i = 1; i <= (c.steps || 0); i++) steps.append(el('i', { class: i <= c.step ? 'on' : '' }));
+    $('#cap-skip').textContent = c.skipLabel || 'Skip';
+    $('#cap-skip').onclick = c.onSkip || null;
+    box.hidden = false;
+  }
+  function whereAmI(text) { $('#where').textContent = text; $('#where').hidden = !text; }
+  function followButton(planId) {
+    const b = el('button', { class: 'follow', type: 'button' });
+    b.innerHTML = '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2 1v10l9-5z" fill="currentColor"/></svg>';
+    b.append(`Follow a pallet of ${planId}`);
+    b.addEventListener('click', () => {
+      if (!state.fx) return;
+      if (!state.model.getPlan(planId)) { b.textContent = `${planId} was released`; b.disabled = true; return; }
+      showTab('preview'); state.fx.followPallet(planId);
+    });
+    return b;
+  }
+  const tourText = log => log.filter(s => s.name === 'give_tour' && s.ok && s.input && Array.isArray(s.input.stops)).flatMap(s => s.input.stops.map(x => String(x.caption || ''))).join(' ');
+
+  function showSlot(slot, planId, e) {
+    const card = $('#slot-card');
+    if (!slot) { card.hidden = true; return; }
+    const z = W.zoneById(slot.zone);
+    const plan = planId ? state.model.getPlan(planId) : null;
+    card.innerHTML = '';
+    card.append(
+      el('h4', { text: slot.id }),
+      el('dl', {},
+        el('dt', { text: 'Zone' }), el('dd', { text: `${z.id} ${z.name} (${z.temp.min}–${z.temp.max} °C)` }),
+        el('dt', { text: 'Row · bay · level' }), el('dd', { text: `${slot.row} · ${slot.bay} · ${slot.level}` }),
+        el('dt', { text: 'Beam limit' }), el('dd', { text: `${slot.maxKg} kg per pallet` }),
+        el('dt', { text: 'Status' }), el('dd', { text: plan ? `Reserved for ${plan.plan_id} (${plan.goods})` : slot.status === 'blocked' ? `Blocked: ${slot.note}` : 'Occupied by an existing client' }),
+      ));
+    const r = $('#stage').getBoundingClientRect();
+    card.hidden = false;
+    const x = Math.min(e.clientX - r.left + 14, r.width - card.offsetWidth - 8);
+    const y = Math.min(e.clientY - r.top + 14, r.height - card.offsetHeight - 8);
+    card.style.left = Math.max(8, x) + 'px'; card.style.top = Math.max(8, y) + 'px';
+  }
+
+  // ---------- Capacity strip ----------
+  function refresh() {
+    const box = $('#capacity');
+    box.querySelectorAll('.cap-row').forEach(n => n.remove());
+    for (const z of state.model.zoneStatus()) {
+      const used = ((z.occupied + z.blocked) / z.total_positions) * 100;
+      const res = (z.reserved_in_this_session / z.total_positions) * 100;
+      box.append(el('div', { class: 'cap-row', title: `${z.name}: ${z.free_now} free of ${z.total_positions}` },
+        el('b', { style: `background:var(--zone-${z.zone})`, text: z.zone }),
+        el('div', { class: 'bar', role: 'img', 'aria-label': `${z.name}: ${Math.round(used)}% occupied, ${Math.round(res)}% reserved by your plans` },
+          el('i', { class: 'used', style: `width:${used}%` }), el('i', { class: 'res', style: `width:${res}%` })),
+        el('span', { class: 'num', text: `${fmt(z.free_now)} free` })));
+    }
+  }
+
+  const planColor = id => A.PLAN_COLORS[(parseInt(String(id).replace(/\D/g, ''), 10) - 1) % A.PLAN_COLORS.length];
+
+  // ---------- Report ----------
+  function renderReport(rep) {
+    const host = state.currentMsg || $('#chat');
+    const rows = rep.plans.map(p => el('tr', {},
+      el('td', {}, el('span', { class: 'sw', style: `display:inline-block;vertical-align:-1px;margin-right:5px;background:var(${planColor(p.plan_id)})` }), p.plan_id),
+      el('td', { text: p.goods }),
+      el('td', { text: `${p.zone} ${p.zone_name}` }),
+      el('td', { text: `${fmt(p.pallets_reserved)} / ${fmt(p.pallets_requested)}` }),
+      el('td', { class: 'mono', text: p.rows }),
+      el('td', { text: p.main_dock }),
+      el('td', { text: `${p.avg_travel_m} m` }),
+      el('td', { text: `${p.putaway_forklift_hours} h` })));
+    const notes = rep.plans.flatMap(p => (p.notes || []).map(n => `${p.plan_id}: ${n}`));
+    const asText = () => [
+      `Client summary — ${rep.client}`, `${rep.site} (${rep.note})`, '',
+      ...rep.plans.map(p => `${p.plan_id} ${p.goods}: ${p.pallets_reserved}/${p.pallets_requested} pallets, zone ${p.zone} ${p.zone_name} (${p.temperature}), ${p.rows}, dock ${p.main_dock}, avg travel ${p.avg_travel_m} m, put-away ${p.putaway_forklift_hours} forklift-hours${p.shortfall ? `, short by ${p.shortfall}` : ''}`),
+      '', `Total reserved: ${rep.total_pallets_reserved} pallets. Shortfall: ${rep.total_shortfall}. Put-away: ${rep.total_putaway_forklift_hours} forklift-hours.`,
+      ...(notes.length ? ['', 'Notes:', ...notes] : []),
+      ...(rep.open_questions.length ? ['', 'To confirm:', ...rep.open_questions.map(q => '- ' + q)] : []),
+      '', `Assumptions: ${rep.assumptions}`].join('\n');
+    const copyBtn = el('button', { class: 'btn', type: 'button', text: 'Copy as text' });
+    copyBtn.addEventListener('click', async () => {
+      try { await navigator.clipboard.writeText(asText()); copyBtn.textContent = 'Copied'; }
+      catch { const ta = el('textarea'); ta.value = asText(); document.body.append(ta); ta.select(); try { document.execCommand('copy'); copyBtn.textContent = 'Copied'; } catch { copyBtn.textContent = 'Select and copy manually'; } ta.remove(); }
+      setTimeout(() => (copyBtn.textContent = 'Copy as text'), 1800);
+    });
+    host.append(el('div', { class: 'report' },
+      el('h3', { text: `Client summary · ${rep.client}` }),
+      el('div', { class: 'sub', text: `${rep.site} · ${rep.note}` }),
+      el('div', { class: 'tw' }, el('table', {},
+        el('thead', {}, el('tr', {}, ...['Plan', 'Goods', 'Zone', 'Pallets', 'Rows', 'Dock', 'Avg travel', 'Put-away'].map(h => el('th', { text: h })))),
+        el('tbody', {}, ...rows))),
+      el('p', { style: 'margin:8px 0 0', text: `Total reserved ${fmt(rep.total_pallets_reserved)} pallets · shortfall ${fmt(rep.total_shortfall)} · put-away ${rep.total_putaway_forklift_hours} forklift-hours` }),
+      notes.length ? el('ul', {}, ...notes.map(n => el('li', { text: n }))) : null,
+      rep.open_questions.length ? el('div', {}, el('p', { style: 'margin:8px 0 0;font-weight:600', text: 'To confirm with you' }), el('ul', {}, ...rep.open_questions.map(q => el('li', { text: q })))) : null,
+      el('p', { class: 'note', style: 'margin-top:8px', text: `Assumptions: ${rep.assumptions}` }),
+      el('div', { class: 'actions' }, copyBtn)));
+    scrollChat();
+  }
+
+  // ---------- Chat ----------
+  const ICONS = {
+    run: '<svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="20 18"/></svg>',
+    ok: '<svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="7" fill="var(--good)"/><path d="M4.5 8.2l2.2 2.2 4.8-4.8" fill="none" stroke="#fff" stroke-width="1.8"/></svg>',
+    fail: '<svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="7" fill="var(--critical)"/><path d="M5.5 5.5l5 5M10.5 5.5l-5 5" stroke="#fff" stroke-width="1.8"/></svg>',
+  };
+  const scrollChat = () => { const c = $('#chat'); c.scrollTop = c.scrollHeight; };
+
+  function addUser(text) {
+    $('#welcome') && $('#welcome').remove();
+    $('#chat').append(el('div', { class: 'msg user', text }));
+    scrollChat();
+  }
+
+  function addAgent() {
+    const steps = el('ol', { class: 'steps', hidden: '' });
+    const text = el('div', { class: 'text thinking', text: 'Thinking…' });
+    const msg = el('div', { class: 'msg agent' }, el('div', { class: 'who' }, el('span', { text: 'Agent' })), steps, text);
+    $('#chat').append(msg);
+    scrollChat();
+    return { msg, steps, text };
+  }
+
+  async function send(userText, scenario) {
+    if (state.busy || !state.brain) return;
+    if (!state.viewer) { addUser(userText); addAgent().text.textContent = 'The 3D view is not available, so I cannot plan in it right now.'; return; }
+    state.busy = true;
+    setBusy(true);
+    addUser(userText);
+    const ui = addAgent();
+    state.currentMsg = ui.msg;
+    const log = [];
+    const hooks = {
+      onStepStart({ tool, input }) {
+        ui.steps.hidden = false;
+        const li = el('li', { class: 'step run' });
+        li.dataset.tool = tool.name;
+        li.innerHTML = ICONS.run;
+        li.append(el('div', {}, el('span', { class: 'name', text: tool.label }), el('span', { class: 'res', text: tool.pending(input || {}) + '…' })));
+        ui.steps.append(li);
+        scrollChat();
+        return li;
+      },
+      onStepEnd(li, r) {
+        li.className = 'step ' + (r.ok ? 'ok' : 'fail');
+        li.querySelector('.ic').outerHTML = r.ok ? ICONS.ok : ICONS.fail;
+        li.querySelector('.res').textContent = r.summary;
+        if (li.dataset.tool === 'find_space' && r.ok && r.result.eligible && r.result.pallets_reserved > 0) li.after(followButton(r.result.plan_id));
+        scrollChat();
+      },
+      onText(t) { ui.text.classList.remove('thinking'); ui.text.textContent = t; scrollChat(); },
+    };
+    const sitePrompt = A.instructions(state.model); // snapshot used for the grounding check
+    state.ctl = new AbortController();
+    try {
+      const { text, truncated } = await state.brain.turn({
+        ctx: { model: state.model, viewer: state.viewer, ui: { planColor, renderReport, refresh } },
+        history: state.history.slice(-10), userText, scenario, hooks, signal: state.ctl.signal, log,
+      });
+      ui.text.classList.remove('thinking');
+      ui.text.textContent = text;
+      if (truncated) ui.msg.append(el('div', { class: 'note', text: 'The answer was cut short. Ask for less at a time.' }));
+      const g = A.groundingCheck(text + ' ' + tourText(log), [sitePrompt, userText, ...log.map(s => s.result || '')]);
+      ui.msg.append(el('span', { class: 'badge ' + (g.ungrounded.length ? 'warn' : 'ok'), title: 'Numbers in this answer were compared with the tool results and site data.' },
+        g.ungrounded.length ? `Check: ${g.ungrounded.join(', ')} not found in the data` : `${g.checked} number${g.checked === 1 ? '' : 's'} traced to data · ${log.length} tool call${log.length === 1 ? '' : 's'}`));
+      state.history.push({ role: 'user', content: userText }, { role: 'assistant', content: text });
+    } catch (e) {
+      const code = e && e.code;
+      ui.text.classList.remove('thinking');
+      if (code === 'cancelled') ui.text.textContent = (e.text || '') + (e.text ? '\n\n' : '') + 'Stopped.';
+      else if (['not_granted', 'sampling_disabled', 'tools_unavailable', 'not_declared', 'capability_disabled'].includes(code)) {
+        ui.text.textContent = 'AI chat is not available in this view, so I switched to the guided demo. Pick a scenario below to watch the same tools run.';
+        setBrain(A.GuidedDemo());
+      } else if (code === 'rate_limited') ui.text.textContent = 'Too many requests just now. Wait a minute and send again.';
+      else if (code === 'session_expired') ui.text.textContent = 'Your Claude session expired. Sign in again, then resend.';
+      else ui.text.textContent = (e.text ? e.text + '\n\n' : '') + `Something went wrong reaching the AI${e.message ? ` (${e.message})` : ''}. Send again, or use a guided scenario.`;
+    } finally {
+      state.busy = false; state.currentMsg = null;
+      if (state.pendingBrain) { setBrain(state.pendingBrain); state.pendingBrain = null; }
+      setBusy(false);
+      refresh();
+    }
+  }
+
+  function setBusy(b) {
+    $('#send').hidden = b; $('#stop').hidden = !b;
+    $('#input').disabled = b;
+    document.querySelectorAll('.chip').forEach(c => (c.disabled = b));
+  }
+
+  function setBrain(brain) {
+    state.brain = brain;
+    const live = brain.id !== 'guided';
+    $('#brain-dot').className = 'dot ' + (live ? 'live' : 'demo');
+    $('#brain-label').textContent = brain.label;
+    $('#input').placeholder = live ? 'e.g. 400 pallets of vaccines at 2–8 °C' : 'AI is off here. Try a scenario above.';
+    $('#input').disabled = !live;
+    $('#send').disabled = !live;
+    document.querySelector('.composer .meta .seg').parentElement.hidden = !live;
+  }
+
+  async function detectBrain() {
+    const tier = () => state.tier;
+    if (window.claude && typeof window.claude.use === 'function') {
+      try {
+        const sample = await window.claude.use('sample');
+        if (sample) {
+          const lim = await sample.limits().catch(() => null);
+          if (lim && lim.tools) return A.ClaudeInArtifact(sample, tier);
+        }
+      } catch { /* fall through */ }
+    }
+    if (location.protocol !== 'file:') try {
+      const r = await fetch('api/health', { cache: 'no-store' });
+      const h = r.ok ? await r.json() : null;
+      if (h && h.ok && h.api === 'openai') return A.OpenAICompatible('api/chat', tier, `${h.label} · ${h.model}`);
+      if (h && h.ok) return Object.assign(A.AnthropicApi('api/messages', tier), { label: `Claude API · ${h.model}` });
+    } catch { /* not served by server.js */ }
+    return A.GuidedDemo();
+  }
+
+  // ---------- Tabs ----------
+  const TABS = ['preview', 'tests', 'about'];
+  function showTab(name) {
+    if (!TABS.includes(name)) name = 'preview';
+    for (const t of TABS) {
+      $('#tab-' + t).setAttribute('aria-selected', String(t === name));
+      $('#view-' + t).hidden = t !== name;
+    }
+    if (name === 'preview' && state.viewer) state.viewer.resize();
+    if (name === 'tests' && window.WarehouseEval) window.WarehouseEval.mount($('#tests-root'), api);
+    if (name === 'about' && window.WarehouseAbout) window.WarehouseAbout.mount($('#about-root'), api);
+  }
+
+  // Public surface for the test bench and the About page
+  const api = {
+    state, send, refresh, planColor, renderReport, showTab, setBrain,
+    reset() {
+      state.fx && state.fx.stopAll();
+      state.model.clearAll(); state.viewer && state.viewer.clearPlans(); state.history = []; refresh();
+    },
+    loadSlots(slots) {
+      state.model.load(slots); state.history = [];
+      if (state.viewer) { state.fx && state.fx.stopAll(); state.viewer.rebuild(); state.fx && state.fx.rebuild(); }
+      refresh();
+    },
+  };
+  window.__api = api;
+
+  // ---------- Boot ----------
+  function boot() {
+    startViewer();
+    refresh();
+    const chips = $('#chips');
+    for (const s of A.SCENARIOS) chips.append(el('button', { class: 'chip', type: 'button', text: s.chip, onclick: () => send(s.prompt, s) }));
+    $('#form').addEventListener('submit', e => { e.preventDefault(); const t = $('#input').value.trim(); if (t) { $('#input').value = ''; send(t); } });
+    $('#input').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('#form').requestSubmit(); } });
+    $('#input').addEventListener('input', e => { e.target.style.height = 'auto'; e.target.style.height = Math.min(120, e.target.scrollHeight) + 'px'; });
+    $('#stop').addEventListener('click', () => state.ctl && state.ctl.abort());
+    $('#reset').addEventListener('click', () => {
+      api.reset(); state.viewer && state.viewer.focus('overview');
+      $('#chat').append(el('div', { class: 'note', text: 'Plans cleared. All reserved positions are free again.' })); scrollChat();
+    });
+    for (const t of ['quick', 'default']) $('#tier-' + t).addEventListener('click', () => {
+      state.tier = t;
+      $('#tier-quick').setAttribute('aria-pressed', String(t === 'quick'));
+      $('#tier-default').setAttribute('aria-pressed', String(t === 'default'));
+    });
+    document.querySelectorAll('[data-cam]').forEach(b => b.addEventListener('click', () => {
+      if (!state.viewer) return;
+      if (state.fx && state.fx.mode === 'walk' && state.fx.teleport(b.dataset.cam)) return;
+      state.viewer.focus(b.dataset.cam);
+    }));
+    $('#btn-walk').addEventListener('click', () => { if (!state.fx) return; state.fx.mode === 'walk' ? state.fx.exitWalk() : state.fx.enterWalk(); });
+    $('#btn-tour').addEventListener('click', () => { if (!state.fx) return; state.fx.mode === 'tour' ? state.fx.stopTour() : state.fx.startTour(state.fx.defaultTour(), 'Site tour'); });
+    $('#btn-sound').addEventListener('click', async () => {
+      if (!state.fx) return;
+      const on = await state.fx.sound.toggle();
+      setBtn('#btn-sound', on, on ? 'Sound on' : 'Sound off');
+    });
+    const PAD = { f: [1, 0, 0], b: [-1, 0, 0], l: [0, -1, 0], r: [0, 1, 0], tl: [0, 0, 1], tr: [0, 0, -1] };
+    document.querySelectorAll('[data-pad]').forEach(b => {
+      const go = e => { e.preventDefault(); state.fx && state.fx.setPad(...PAD[b.dataset.pad]); };
+      const stop = () => state.fx && state.fx.setPad(0, 0, 0);
+      b.addEventListener('pointerdown', go); b.addEventListener('pointerup', stop); b.addEventListener('pointerleave', stop); b.addEventListener('pointercancel', stop);
+    });
+    if (state.fx) onMode('orbit');
+    TABS.forEach(t => $('#tab-' + t).addEventListener('click', () => showTab(t)));
+    showTab((location.hash || '').slice(1));
+    // Guided demo works at once; upgrade to the live AI as soon as it is found.
+    setBrain(A.GuidedDemo());
+    $('#brain-label').textContent = 'Looking for AI…';
+    detectBrain().then(b => { if (!state.busy || b.id === 'guided') setBrain(b); else state.pendingBrain = b; });
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();
+})();
+
+</script>
+
+</body>
+</html>

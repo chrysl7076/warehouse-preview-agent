@@ -1,0 +1,19 @@
+{
+  "name": "warehouse-preview-agent",
+  "version": "1.0.0",
+  "description": "Concept prototype: an AI agent that plans where a client's goods would go in a 3D warehouse, using fictional sample data.",
+  "private": true,
+  "scripts": {
+    "build": "node scripts/export-data.js > /dev/null && node scripts/build.js",
+    "start": "node scripts/build.js && node server.js",
+    "test": "node --test tests/core.test.js tests/eval-oracle.test.js",
+    "test:e2e": "node scripts/build.js && node tests/e2e-mock.js && node tests/e2e-immersive.js && node tests/e2e-openai.js",
+    "eval": "node scripts/run-eval.js",
+    "eval:thorough": "node scripts/run-eval.js --thorough"
+  },
+  "engines": { "node": ">=18" },
+  "dependencies": {
+    "three": "0.128.0"
+  },
+  "license": "MIT"
+}
